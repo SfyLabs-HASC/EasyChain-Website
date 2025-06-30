@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Link } from 'react-router-dom';
 import { ConnectButton, useActiveAccount, useReadContract, useSendTransaction } from 'thirdweb/react';
-import { createThirdwebClient, getContract, prepareContractCall, readContract } from 'thirdweb';
+// Rimosso 'readContract' perché non più usato per caricare la lista
+import { createThirdwebClient, getContract, prepareContractCall } from 'thirdweb';
 import { polygon } from 'thirdweb/chains';
 import { inAppWallet } from 'thirdweb/wallets';
 import { supplyChainABI as abi } from '../abi/contractABI';
@@ -9,33 +10,25 @@ import '../App.css';
 
 import TransactionStatusModal from '../components/TransactionStatusModal';
 
-// --- Stili CSS incorporati per responsività e per risolvere errore di build ---
+// --- Stili CSS (invariati) ---
 const AziendaPageStyles = () => (
   <style>{`
-    /* Stili globali per la pagina */
+    /* Stili globali per la pagina (omessi per brevità) */
     .app-container-full { padding: 0 2rem; }
     .main-header-bar { display: flex; justify-content: space-between; align-items: center; }
     .header-title { font-size: 1.75rem; font-weight: bold; }
-    
-    /* Header del Dashboard */
     .dashboard-header-card { display: flex; justify-content: space-between; align-items: center; position: relative; padding: 1.5rem; background-color: #212529; border: 1px solid #495057; border-radius: 8px; margin-bottom: 2rem; }
     .dashboard-header-info { display: flex; flex-direction: column; }
     .company-name-header { margin-top: 0; margin-bottom: 1rem; font-size: 3rem; }
     .company-status-container { display: flex; align-items: center; gap: 1.5rem; }
     .status-item { display: flex; align-items: center; gap: 0.5rem; }
     .header-actions .web3-button.large { padding: 1rem 2rem; font-size: 1.1rem; }
-
-    /* Tabella e righe per Desktop */
     .company-table .desktop-row { display: table-row; }
     .company-table .mobile-card { display: none; }
     .pagination-controls { display: flex; justify-content: space-between; align-items: center; margin-top: 1rem; }
-
-    /* Stili per il riepilogo nel modal */
     .recap-summary { text-align: left; padding: 15px; background-color: #2a2a2a; border: 1px solid #444; border-radius: 8px; margin-bottom: 20px;}
     .recap-summary p { margin: 8px 0; word-break: break-word; }
     .recap-summary p strong { color: #f8f9fa; }
-
-    /* Media Query per dispositivi mobili (max-width: 768px) */
     @media (max-width: 768px) {
         .app-container-full { padding: 0 1rem; }
         .main-header-bar { flex-direction: column; align-items: flex-start; gap: 1rem; }
@@ -46,13 +39,11 @@ const AziendaPageStyles = () => (
         .company-status-container { flex-direction: column; align-items: flex-start; gap: 0.75rem; }
         .header-actions { width: 100%; }
         .header-actions .web3-button.large { width: 100%; font-size: 1rem; }
-        
         .company-table thead { display: none; }
         .company-table .desktop-row { display: none; }
         .company-table tbody, .company-table tr, .company-table td { display: block; width: 100%; }
         .company-table tr { margin-bottom: 1rem; }
         .company-table td[colspan="7"] { padding: 20px; text-align: center; border: 1px solid #495057; border-radius: 8px; }
-        
         .mobile-card { display: block; border: 1px solid #495057; border-radius: 8px; padding: 1rem; margin-bottom: 1rem; background-color: #2c3e50; }
         .mobile-card .card-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.75rem; border-bottom: 1px solid #495057; padding-bottom: 0.75rem; }
         .mobile-card .card-header strong { font-size: 1.1rem; }
@@ -65,17 +56,20 @@ const AziendaPageStyles = () => (
   `}</style>
 );
 
-const client = createThirdwebClient({ clientId: "e40dfd747fabedf48c5837fb79caf2eb" });
+// --- MODIFICA 1: AGGIORNAMENTO CLIENT ID E INDIRIZZO CONTRATTO ---
+const client = createThirdwebClient({ clientId: "eda8282e23ee12f17d8d1d20ef8aaa83" });
 const contract = getContract({ 
   client, 
   chain: polygon,
-  address: "0x4a866C3A071816E3186e18cbE99a3339f4571302"
+  address: "0xACa1fA95E1b8C52398BeA2C708be7a164D897450"
 });
 
 const RegistrationForm = () => ( <div className="card"><h3>Benvenuto su Easy Chain!</h3><p>Il tuo account non è ancora attivo. Compila il form di registrazione per inviare una richiesta di attivazione.</p></div> );
 
 const BatchRow = ({ batch, localId }: { batch: BatchData; localId: number }) => {
     const [showDescription, setShowDescription] = useState(false);
+    // Nota: Questa chiamata RPC per il conteggio rimane perché è per una singola riga, 
+    // l'impatto è minimo rispetto al caricamento dell'intera lista.
     const { data: stepCount } = useReadContract({ contract, abi, method: "function getBatchStepCount(uint256 _batchId) view returns (uint256)", params: [batch.batchId] });
     const formatDate = (dateStr: string | undefined) => !dateStr || dateStr.split('-').length !== 3 ? '/' : dateStr.split('-').reverse().join('/');
     return (
@@ -105,7 +99,18 @@ const BatchRow = ({ batch, localId }: { batch: BatchData; localId: number }) => 
     );
 };
 
-interface BatchData { id: string; batchId: bigint; name: string; description: string; date: string; location: string; isClosed: boolean; }
+// --- MODIFICA 2: AGGIORNAMENTO INTERFACCIA CON NUOVI CAMPI DA INSIGHT ---
+interface BatchData {
+    id: string;
+    batchId: bigint;
+    name: string;
+    description: string;
+    date: string;
+    location: string;
+    imageIpfsHash: string;
+    contributorName: string;
+    isClosed: boolean;
+}
 
 const BatchTable = ({ batches, nameFilter, setNameFilter, locationFilter, setLocationFilter, statusFilter, setStatusFilter }: any) => {
     const [currentPage, setCurrentPage] = useState(1); const [itemsToShow, setItemsToShow] = useState(10); const MAX_PER_PAGE = 30; const totalPages = Math.max(1, Math.ceil(batches.length / MAX_PER_PAGE)); const startIndex = (currentPage - 1) * MAX_PER_PAGE; const itemsOnCurrentPage = batches.slice(startIndex, startIndex + MAX_PER_PAGE); const visibleBatches = itemsOnCurrentPage.slice(0, itemsToShow); useEffect(() => { setCurrentPage(1); setItemsToShow(10); }, [batches, nameFilter, locationFilter, statusFilter]); const handleLoadMore = () => setItemsToShow(prev => Math.min(prev + 10, MAX_PER_PAGE)); const handlePageChange = (page: number) => { if (page < 1 || page > totalPages) return; setCurrentPage(page); setItemsToShow(10); };
@@ -134,12 +139,7 @@ const DashboardHeader = ({ contributorInfo, onNewInscriptionClick }: { contribut
 };
 
 const getInitialFormData = () => ({ name: "", description: "", date: "", location: "" });
-
-// Funzione per troncare il testo
-const truncateText = (text: string, maxLength: number) => {
-    if (!text) return text;
-    return text.length > maxLength ? text.substring(0, maxLength) + "..." : text;
-};
+const truncateText = (text: string, maxLength: number) => { if (!text) return text; return text.length > maxLength ? text.substring(0, maxLength) + "..." : text; };
 
 export default function AziendaPage() {
     const account = useActiveAccount();
@@ -159,16 +159,54 @@ export default function AziendaPage() {
     const [loadingMessage, setLoadingMessage] = useState('');
     const [currentStep, setCurrentStep] = useState(1);
 
+    // --- MODIFICA 3: SOSTITUZIONE LOGICA DI FETCH CON INSIGHT (API REST) ---
     const fetchAllBatches = async () => {
         if (!account?.address) return;
         setIsLoadingBatches(true);
+
+        const insightBaseUrl = 'https://polygon.insight.thirdweb.com';
+        const contractAddress = '0xACa1fA95E1b8C52398BeA2C708be7a164D897450';
+        const eventSignature = 'BatchInitialized(address,uint256,string,string,string,string,string,string,bool)';
+        
+        const url = new URL(`${insightBaseUrl}/v1/contracts/${contractAddress}/events/${eventSignature}`);
+        
+        url.searchParams.append('contributor', account.address);
+        url.searchParams.append('order', 'desc');
+
         try {
-            const batchIds = await readContract({ contract, abi, method: "function getBatchesByContributor(address) view returns (uint256[])", params: [account.address] }) as bigint[];
-            const batchDataPromises = batchIds.map(id => readContract({ contract, abi, method: "function getBatchInfo(uint256) view returns (uint256,address,string,string,string,string,string,string,bool)", params: [id] }).then(info => ({ id: id.toString(), batchId: id, name: info[3], description: info[4], date: info[5], location: info[6], isClosed: info[8] })));
-            const results = await Promise.all(batchDataPromises);
-            setAllBatches(results.sort((a, b) => Number(b.batchId) - Number(a.batchId)));
-        } catch (error) { console.error("Errore nel caricare i lotti:", error); setAllBatches([]); } 
-        finally { setIsLoadingBatches(false); }
+            const response = await fetch(url.toString(), {
+                headers: {
+                    'x-client-id': 'eda8282e23ee12f17d8d1d20ef8aaa83',
+                }
+            });
+
+            if (!response.ok) {
+                const errorData = await response.json();
+                throw new Error(errorData.error?.message || 'Fallimento nel recuperare i dati da Insight');
+            }
+
+            const events = await response.json();
+            
+            // Mappiamo la risposta dell'API REST nel formato che il nostro componente si aspetta
+            const formattedBatches = events.map((event: any) => ({
+                id: event.arguments.batchId.toString(),
+                batchId: BigInt(event.arguments.batchId),
+                name: event.arguments.name,
+                description: event.arguments.description,
+                date: event.arguments.date,
+                location: event.arguments.location,
+                imageIpfsHash: event.arguments.imageIpfsHash,
+                contributorName: event.arguments.contributorName,
+                isClosed: event.arguments.isClosed,
+            }));
+            
+            setAllBatches(formattedBatches);
+        } catch (error) {
+            console.error("Errore nel caricare le iscrizioni da Insight (REST API):", error);
+            setAllBatches([]);
+        } finally {
+            setIsLoadingBatches(false);
+        }
     };
 
     useEffect(() => {
@@ -201,7 +239,10 @@ export default function AziendaPage() {
             try {
                 const body = new FormData(); body.append('file', selectedFile); body.append('companyName', contributorData?.[0] || 'AziendaGenerica');
                 const response = await fetch('/api/upload', { method: 'POST', body });
-                if (!response.ok) { const errorData = await response.json(); throw new Error(errorData.details || 'Errore dal server di upload.'); }
+                if (!response.ok) { 
+                    const errorText = await response.text();
+                    throw new Error(`Errore del server: ${errorText}`); 
+                }
                 const { cid } = await response.json(); if (!cid) throw new Error("CID non ricevuto dall'API di upload."); imageIpfsHash = cid;
             } catch (error: any) { setTxResult({ status: 'error', message: `Errore caricamento: ${error.message}` }); setLoadingMessage(''); return; }
         }

@@ -1,31 +1,32 @@
-// FILE: src/pages/GestisciPage.tsx (CON URL PLACEHOLDER AGGIORNATO)
-
 import React, { useState, useEffect } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { ConnectButton, useActiveAccount, useReadContract, useSendTransaction } from 'thirdweb/react';
-import { createThirdwebClient, getContract, prepareContractCall, readContract } from 'thirdweb';
+// Rimosso 'readContract' perché non più usato per caricare la lista dei dati
+import { createThirdwebClient, getContract, prepareContractCall } from 'thirdweb';
 import { polygon } from 'thirdweb/chains';
 import { supplyChainABI as abi } from '../abi/contractABI';
 import '../App.css';
 import TransactionStatusModal from '../components/TransactionStatusModal';
 
-const client = createThirdwebClient({ clientId: "e40dfd747fabedf48c5837fb79caf2eb" });
+// --- MODIFICA: AGGIORNAMENTO CLIENT ID E INDIRIZZO CONTRATTO ---
+const client = createThirdwebClient({ clientId: "eda8282e23ee12f17d8d1d20ef8aaa83" });
 const contract = getContract({ 
   client, 
   chain: polygon,
-  address: "0x4a866C3A071816E3186e18cbE99a3339f4571302"
+  address: "0xACa1fA95E1b8C52398BeA2C708be7a164D897450"
 });
 
+// --- MODIFICA: Componente aggiornato per leggere da un oggetto (es. eventoInfo.eventName) ---
 const EventoCard = ({ eventoInfo }: { eventoInfo: any }) => (
     <div className="card" style={{backgroundColor: '#343a40', color: '#f8f9fa', marginTop: '1rem'}}>
-        <h4>{eventoInfo[0]}</h4>
-        <p>{eventoInfo[1]}</p>
+        <h4>{eventoInfo.eventName}</h4>
+        <p>{eventoInfo.description}</p>
         <div style={{display: 'flex', justifyContent: 'space-between', fontSize: '0.9rem', color: '#adb5bd'}}>
-            <span>Luogo: {eventoInfo[3]}</span>
-            <span>Data: {eventoInfo[2]}</span>
+            <span>Luogo: {eventoInfo.location}</span>
+            <span>Data: {eventoInfo.date}</span>
         </div>
-        {eventoInfo[4] && eventoInfo[4] !== "N/A" && (
-             <a href={`https://musical-emerald-partridge.myfilebase.com/ipfs/${eventoInfo[4]}`} target="_blank" rel="noopener noreferrer" className="link-button" style={{marginTop: '1rem'}}>
+        {eventoInfo.attachmentsIpfsHash && eventoInfo.attachmentsIpfsHash !== "N/A" && (
+             <a href={`https://musical-emerald-partridge.myfilebase.com/ipfs/${eventoInfo.attachmentsIpfsHash}`} target="_blank" rel="noopener noreferrer" className="link-button" style={{marginTop: '1rem'}}>
                  Vedi Documento Allegato
              </a>
         )}
@@ -65,7 +66,10 @@ const AggiungiEventoModal = ({ batchId, contributorName, onClose, onSuccess }: {
                 body.append('file', selectedFile);
                 body.append('companyName', contributorName);
                 const response = await fetch('/api/upload', { method: 'POST', body });
-                if (!response.ok) throw new Error((await response.json()).details || 'Errore dal server di upload.');
+                if (!response.ok) {
+                    const errorText = await response.text();
+                    throw new Error(`Errore del server: ${errorText}`);
+                }
                 const { cid } = await response.json();
                 if (!cid) throw new Error("CID non ricevuto dalla nostra API.");
                 attachmentsIpfsHash = cid;
@@ -138,7 +142,6 @@ const GestisciPageHeader = ({ contributorInfo }: { contributorInfo: any }) => {
     return (
         <div className="dashboard-header-card" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <div>
-                {/* MODIFICA: Aumentata grandezza del font */}
                 <h2 style={{ marginTop: 0, marginBottom: '1rem', fontSize: '3rem' }}>{companyName}</h2>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '1.5rem' }}>
                     <div className="status-item"><span>Crediti Rimanenti: <strong>{credits}</strong></span></div>
@@ -158,42 +161,31 @@ const GestisciPageHeader = ({ contributorInfo }: { contributorInfo: any }) => {
 
 const ImagePlaceholder = () => ( <div style={{width:'150px',height:'150px',flexShrink:0,backgroundColor:'#f0f0f0',border:'1px solid #ddd',borderRadius:'8px',display:'flex',flexDirection:'column',justifyContent:'center',alignItems:'center',color:'#a0a0a0',textAlign:'center'}}><svg xmlns="http://www.w3.org/2000/svg" width="40" height="40" fill="currentColor" viewBox="0 0 16 16"><path d="M6.002 5.5a1.5 1.5 0 1 1-3 0 1.5 1.5 0 0 1 3 0z"/><path d="M2.002 1a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V3a2 2 0 0 0-2-2h-12zm12 1a1 1 0 0 1 1 1v6.5l-3.777-1.947a.5.5 0 0 0-.577.093l-3.71 3.71-2.66-1.772a.5.5 0 0 0-.63.062L1.002 12V3a1 1 0 0 1 1-1h12z"/></svg><div style={{fontSize:'0.8rem',marginTop:'5px',fontWeight:'bold'}}>NO IMAGE<br/>AVAILABLE</div></div> );
 
+// --- MODIFICA: Componente aggiornato per leggere da un oggetto (es. batchInfo.name) ---
 const BatchSummaryCard = ({ batchInfo, eventCount, onAddEventoClick, onFinalize }: { batchInfo: any, eventCount: number, onAddEventoClick: () => void, onFinalize: () => void }) => {
     if(!batchInfo) return null;
     
-    // --- MODIFICA APPORTATA QUI ---
-    // Ho aggiornato l'URL dell'immagine di default come richiesto.
     const defaultImageUrl="https://musical-emerald-partridge.myfilebase.com/ipfs/QmNUGt9nxmkV27qF56jFAG9FUPABvGww5TTW9R9vh2TdvB";
-
-    const imageUrl=batchInfo[7]&&batchInfo[7]!=="N/A"?`https://musical-emerald-partridge.myfilebase.com/ipfs/${batchInfo[7]}`:defaultImageUrl;
+    const imageUrl=batchInfo.imageIpfsHash && batchInfo.imageIpfsHash !=="N/A"?`https://musical-emerald-partridge.myfilebase.com/ipfs/${batchInfo.imageIpfsHash}`:defaultImageUrl;
     const isPlaceholder=imageUrl===defaultImageUrl;
-    const isClosed=batchInfo[8];
+    const isClosed=batchInfo.isClosed;
 
-    // MODIFICA: Stile per il pallino colorato dello stato
-    const statusIndicatorStyle = {
-        height: '12px',
-        width: '12px',
-        backgroundColor: isClosed ? '#28a745' : '#ffc107', // Verde per chiuso, Giallo per aperto
-        borderRadius: '50%',
-        display: 'inline-block',
-        marginRight: '8px',
-    };
+    const statusIndicatorStyle = { height: '12px', width: '12px', backgroundColor: isClosed ? '#28a745' : '#ffc107', borderRadius: '50%', display: 'inline-block', marginRight: '8px' };
 
     return(
         <div className="card" style={{marginTop:'1rem',backgroundColor:'transparent',border:'1px solid #8bc4a8',padding:'1.5rem',display:'flex',alignItems:'center',gap:'2rem'}}>
             {isPlaceholder?<ImagePlaceholder />:<img src={imageUrl} alt="Immagine batch" style={{width:'150px',height:'150px',objectFit:'cover',borderRadius:'8px',flexShrink:0}} />}
             <div style={{flex:'1 1 40%',minWidth:0}}>
-                <h3 style={{fontWeight:'bold',fontSize:'1.75rem',margin:'0 0 0.5rem 0',color:'white'}}>{batchInfo[3]}</h3>
-                <p style={{margin:0,color:'#ced4da',fontSize:'0.95rem'}}>{batchInfo[4]||'Nessuna descrizione fornita.'}</p>
+                <h3 style={{fontWeight:'bold',fontSize:'1.75rem',margin:'0 0 0.5rem 0',color:'white'}}>{batchInfo.name}</h3>
+                <p style={{margin:0,color:'#ced4da',fontSize:'0.95rem'}}>{batchInfo.description||'Nessuna descrizione fornita.'}</p>
             </div>
             <div style={{flex:'1 1 25%',color:'#ced4da',textAlign:'left'}}>
-                {/* MODIFICA: Aggiunto indicatore colorato e usato eventCount */}
                 <p style={{margin:'0.3rem 0', display: 'flex', alignItems: 'center'}}>
                     <span style={statusIndicatorStyle}></span>
                     <strong>Stato Iscrizione:</strong> <span style={{fontWeight:'bold', marginLeft: '4px'}}>{isClosed?'Chiuso':'Aperto'}</span>
                 </p>
-                <p style={{margin:'0.3rem 0'}}><strong>Luogo:</strong> {batchInfo[6]||'N/D'}</p>
-                <p style={{margin:'0.3rem 0'}}><strong>Data:</strong> {batchInfo[5]||'N/D'}</p>
+                <p style={{margin:'0.3rem 0'}}><strong>Luogo:</strong> {batchInfo.location||'N/D'}</p>
+                <p style={{margin:'0.3rem 0'}}><strong>Data:</strong> {batchInfo.date||'N/D'}</p>
                 <p style={{margin:'0.3rem 0'}}><strong>N° Eventi:</strong> {eventCount}</p>
             </div>
             {!isClosed&&(
@@ -209,6 +201,7 @@ const BatchSummaryCard = ({ batchInfo, eventCount, onAddEventoClick, onFinalize 
 export default function GestisciPage() {
     const { batchId } = useParams<{ batchId: string }>();
     const account = useActiveAccount();
+    // Questa chiamata rimane perché i dati del contributor non sono negli eventi del batch
     const { data: contributorInfo } = useReadContract({ contract, method: "function getContributorInfo(address) view returns (string, uint256, bool)", params: account ? [account.address] : undefined });
 
     const [batchInfo, setBatchInfo] = useState<any>(null);
@@ -218,34 +211,70 @@ export default function GestisciPage() {
     const [txResult, setTxResult] = useState<{ status: 'success' | 'error'; message: string } | null>(null);
     const [isModalOpen, setIsModalOpen] = useState(false);
 
-    // MODIFICA: Hook dedicato per leggere il conteggio degli eventi in modo affidabile
-    const { data: eventCount, refetch: refetchEventCount } = useReadContract({
-        contract,
-        method: "function getBatchStepCount(uint256)",
-        params: batchId ? [BigInt(batchId)] : undefined,
-        queryOptions: { enabled: !!batchId }
-    });
+    // Rimosso l'hook `useReadContract` per `eventCount`
 
+    // --- MODIFICA: SOSTITUZIONE LOGICA DI FETCH CON INSIGHT (API REST) ---
     const fetchBatchData = async () => {
         if (!batchId) return;
         setIsLoading(true);
+
+        const insightBaseUrl = 'https://polygon.insight.thirdweb.com';
+        const contractAddress = '0xACa1fA95E1b8C52398BeA2C708be7a164D897450';
+        const clientId = 'eda8282e23ee12f17d8d1d20ef8aaa83';
+
+        const initEventSignature = 'BatchInitialized(address,uint256,string,string,string,string,string,string,bool)';
+        const stepEventSignature = 'BatchStepAdded(uint256,uint256,string,string,string,string,string)';
+        const closeEventSignature = 'BatchClosed(address,uint256)';
+        
+        const headers = { 'x-client-id': clientId };
+
+        const initUrl = new URL(`${insightBaseUrl}/v1/contracts/${contractAddress}/events/${initEventSignature}`);
+        initUrl.searchParams.append('batchId', batchId);
+
+        const stepsUrl = new URL(`${insightBaseUrl}/v1/contracts/${contractAddress}/events/${stepEventSignature}`);
+        stepsUrl.searchParams.append('batchId', batchId);
+        stepsUrl.searchParams.append('order', 'desc');
+
+        const closeUrl = new URL(`${insightBaseUrl}/v1/contracts/${contractAddress}/events/${closeEventSignature}`);
+        closeUrl.searchParams.append('batchId', batchId);
+
         try {
-            const id = BigInt(batchId);
-            const info = await readContract({ contract, abi, method: "function getBatchInfo(uint256) view returns (uint256,address,string,string,string,string,string,string,bool)", params: [id] });
-            setBatchInfo(info);
-            
-            // La logica per caricare i dettagli degli eventi rimane, ma il conteggio ora è gestito dall'hook
-            const count = await readContract({ contract, abi, method: "function getBatchStepCount(uint256) view returns (uint256)", params: [id] }) as bigint;
-            const stepsPromises = Array.from({ length: Number(count) }, (_, i) => 
-                readContract({ contract, abi, method: "function getStepDetails(uint256, uint256) view returns (string, string, string, string, string)", params: [id, BigInt(i)] })
-            );
-            const stepsDetails = await Promise.all(stepsPromises);
-            setEventi(stepsDetails.reverse()); // Mostra i più recenti per primi
-        } catch (error) { console.error("Errore nel caricare i dati del batch:", error); } 
-        finally { setIsLoading(false); }
+            const [initResponse, stepsResponse, closeResponse] = await Promise.all([
+                fetch(initUrl.toString(), { headers }),
+                fetch(stepsUrl.toString(), { headers }),
+                fetch(closeUrl.toString(), { headers })
+            ]);
+
+            if (!initResponse.ok || !stepsResponse.ok || !closeResponse.ok) {
+                console.error("Init Status:", initResponse.status, "Steps Status:", stepsResponse.status, "Close Status:", closeResponse.status);
+                throw new Error("Una delle chiamate a Insight è fallita.");
+            }
+
+            const initEvents = await initResponse.json();
+            const stepEvents = await stepsResponse.json();
+            const closeEvents = await closeResponse.json();
+
+            const mainInfo = initEvents[0]?.arguments;
+            if (mainInfo) {
+                setBatchInfo({
+                    ...mainInfo,
+                    isClosed: closeEvents.length > 0
+                });
+            }
+
+            const formattedSteps = stepEvents.map((event: any) => event.arguments);
+            setEventi(formattedSteps);
+
+        } catch (error) {
+            console.error("Errore nel caricare i dati del batch da Insight:", error);
+        } finally {
+            setIsLoading(false);
+        }
     };
 
-    useEffect(() => { fetchBatchData(); }, [batchId]);
+    useEffect(() => {
+        fetchBatchData();
+    }, [batchId]);
     
     const handleFinalize = () => {
         const confirmationMessage = "Conferma finalizzazione iscrizione\n\nSei sicuro di voler finalizzare questa iscrizione?\nDopo questa operazione non potrai più aggiungere eventi o modificare la filiera.\nL’iscrizione sarà considerata completa e chiusa.";
@@ -261,8 +290,7 @@ export default function GestisciPage() {
     const handleAddEventoSuccess = () => {
         setTxResult({ status: 'success', message: 'Evento aggiunto con successo!' });
         setIsModalOpen(false);
-        fetchBatchData();
-        refetchEventCount(); // MODIFICA: Forza l'aggiornamento del conteggio eventi
+        fetchBatchData(); // Ricarica i dati da Insight
     };
 
     return (
@@ -277,7 +305,7 @@ export default function GestisciPage() {
                 
                 {isLoading ? <p style={{textAlign: 'center', marginTop: '2rem'}}>Caricamento dati iscrizione...</p> : 
                     <>
-                        <BatchSummaryCard batchInfo={batchInfo} eventCount={Number(eventCount) || 0} onAddEventoClick={() => setIsModalOpen(true)} onFinalize={handleFinalize} />
+                        <BatchSummaryCard batchInfo={batchInfo} eventCount={eventi.length} onAddEventoClick={() => setIsModalOpen(true)} onFinalize={handleFinalize} />
                         
                         <div style={{marginTop: '2rem'}}>
                             <h4>Eventi dell'Iscrizione</h4>
