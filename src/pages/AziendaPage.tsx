@@ -1,7 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Link } from 'react-router-dom';
 import { ConnectButton, useActiveAccount, useReadContract, useSendTransaction } from 'thirdweb/react';
-// Rimosso 'readContract' perché non più usato per caricare la lista
 import { createThirdwebClient, getContract, prepareContractCall } from 'thirdweb';
 import { polygon } from 'thirdweb/chains';
 import { inAppWallet } from 'thirdweb/wallets';
@@ -56,7 +55,6 @@ const AziendaPageStyles = () => (
   `}</style>
 );
 
-// --- MODIFICA 1: AGGIORNAMENTO CLIENT ID E INDIRIZZO CONTRATTO ---
 const client = createThirdwebClient({ clientId: "eda8282e23ee12f17d8d1d20ef8aaa83" });
 const contract = getContract({ 
   client, 
@@ -66,10 +64,10 @@ const contract = getContract({
 
 const RegistrationForm = () => ( <div className="card"><h3>Benvenuto su Easy Chain!</h3><p>Il tuo account non è ancora attivo. Compila il form di registrazione per inviare una richiesta di attivazione.</p></div> );
 
+interface BatchData { id: string; batchId: bigint; name: string; description: string; date: string; location: string; imageIpfsHash: string; contributorName: string; isClosed: boolean; }
+
 const BatchRow = ({ batch, localId }: { batch: BatchData; localId: number }) => {
     const [showDescription, setShowDescription] = useState(false);
-    // Nota: Questa chiamata RPC per il conteggio rimane perché è per una singola riga, 
-    // l'impatto è minimo rispetto al caricamento dell'intera lista.
     const { data: stepCount } = useReadContract({ contract, abi, method: "function getBatchStepCount(uint256 _batchId) view returns (uint256)", params: [batch.batchId] });
     const formatDate = (dateStr: string | undefined) => !dateStr || dateStr.split('-').length !== 3 ? '/' : dateStr.split('-').reverse().join('/');
     return (
@@ -98,19 +96,6 @@ const BatchRow = ({ batch, localId }: { batch: BatchData; localId: number }) => 
         </>
     );
 };
-
-// --- MODIFICA 2: AGGIORNAMENTO INTERFACCIA CON NUOVI CAMPI DA INSIGHT ---
-interface BatchData {
-    id: string;
-    batchId: bigint;
-    name: string;
-    description: string;
-    date: string;
-    location: string;
-    imageIpfsHash: string;
-    contributorName: string;
-    isClosed: boolean;
-}
 
 const BatchTable = ({ batches, nameFilter, setNameFilter, locationFilter, setLocationFilter, statusFilter, setStatusFilter }: any) => {
     const [currentPage, setCurrentPage] = useState(1); const [itemsToShow, setItemsToShow] = useState(10); const MAX_PER_PAGE = 30; const totalPages = Math.max(1, Math.ceil(batches.length / MAX_PER_PAGE)); const startIndex = (currentPage - 1) * MAX_PER_PAGE; const itemsOnCurrentPage = batches.slice(startIndex, startIndex + MAX_PER_PAGE); const visibleBatches = itemsOnCurrentPage.slice(0, itemsToShow); useEffect(() => { setCurrentPage(1); setItemsToShow(10); }, [batches, nameFilter, locationFilter, statusFilter]); const handleLoadMore = () => setItemsToShow(prev => Math.min(prev + 10, MAX_PER_PAGE)); const handlePageChange = (page: number) => { if (page < 1 || page > totalPages) return; setCurrentPage(page); setItemsToShow(10); };
@@ -159,14 +144,16 @@ export default function AziendaPage() {
     const [loadingMessage, setLoadingMessage] = useState('');
     const [currentStep, setCurrentStep] = useState(1);
 
-    // --- MODIFICA 3: SOSTITUZIONE LOGICA DI FETCH CON INSIGHT (API REST) ---
     const fetchAllBatches = async () => {
         if (!account?.address) return;
         setIsLoadingBatches(true);
 
         const insightBaseUrl = 'https://polygon.insight.thirdweb.com';
         const contractAddress = '0xACa1fA95E1b8C52398BeA2C708be7a164D897450';
-        const eventSignature = 'BatchInitialized(address,uint256,string,string,string,string,string,string,bool)';
+        
+        // --- MODIFICA APPORTATA QUI ---
+        // Codifichiamo la firma dell'evento per renderla sicura per l'URL
+        const eventSignature = encodeURIComponent('BatchInitialized(address,uint256,string,string,string,string,string,string,bool)');
         
         const url = new URL(`${insightBaseUrl}/v1/contracts/${contractAddress}/events/${eventSignature}`);
         
@@ -187,7 +174,6 @@ export default function AziendaPage() {
 
             const events = await response.json();
             
-            // Mappiamo la risposta dell'API REST nel formato che il nostro componente si aspetta
             const formattedBatches = events.map((event: any) => ({
                 id: event.arguments.batchId.toString(),
                 batchId: BigInt(event.arguments.batchId),
