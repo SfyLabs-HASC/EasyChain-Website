@@ -1,14 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { ConnectButton, useActiveAccount, useReadContract, useSendTransaction } from 'thirdweb/react';
-// Rimosso 'readContract' perché non più usato per caricare la lista dei dati
 import { createThirdwebClient, getContract, prepareContractCall } from 'thirdweb';
 import { polygon } from 'thirdweb/chains';
 import { supplyChainABI as abi } from '../abi/contractABI';
 import '../App.css';
 import TransactionStatusModal from '../components/TransactionStatusModal';
 
-// --- MODIFICA: AGGIORNAMENTO CLIENT ID E INDIRIZZO CONTRATTO ---
 const client = createThirdwebClient({ clientId: "eda8282e23ee12f17d8d1d20ef8aaa83" });
 const contract = getContract({ 
   client, 
@@ -16,7 +14,6 @@ const contract = getContract({
   address: "0xACa1fA95E1b8C52398BeA2C708be7a164D897450"
 });
 
-// --- MODIFICA: Componente aggiornato per leggere da un oggetto (es. eventoInfo.eventName) ---
 const EventoCard = ({ eventoInfo }: { eventoInfo: any }) => (
     <div className="card" style={{backgroundColor: '#343a40', color: '#f8f9fa', marginTop: '1rem'}}>
         <h4>{eventoInfo.eventName}</h4>
@@ -161,7 +158,6 @@ const GestisciPageHeader = ({ contributorInfo }: { contributorInfo: any }) => {
 
 const ImagePlaceholder = () => ( <div style={{width:'150px',height:'150px',flexShrink:0,backgroundColor:'#f0f0f0',border:'1px solid #ddd',borderRadius:'8px',display:'flex',flexDirection:'column',justifyContent:'center',alignItems:'center',color:'#a0a0a0',textAlign:'center'}}><svg xmlns="http://www.w3.org/2000/svg" width="40" height="40" fill="currentColor" viewBox="0 0 16 16"><path d="M6.002 5.5a1.5 1.5 0 1 1-3 0 1.5 1.5 0 0 1 3 0z"/><path d="M2.002 1a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V3a2 2 0 0 0-2-2h-12zm12 1a1 1 0 0 1 1 1v6.5l-3.777-1.947a.5.5 0 0 0-.577.093l-3.71 3.71-2.66-1.772a.5.5 0 0 0-.63.062L1.002 12V3a1 1 0 0 1 1-1h12z"/></svg><div style={{fontSize:'0.8rem',marginTop:'5px',fontWeight:'bold'}}>NO IMAGE<br/>AVAILABLE</div></div> );
 
-// --- MODIFICA: Componente aggiornato per leggere da un oggetto (es. batchInfo.name) ---
 const BatchSummaryCard = ({ batchInfo, eventCount, onAddEventoClick, onFinalize }: { batchInfo: any, eventCount: number, onAddEventoClick: () => void, onFinalize: () => void }) => {
     if(!batchInfo) return null;
     
@@ -201,7 +197,6 @@ const BatchSummaryCard = ({ batchInfo, eventCount, onAddEventoClick, onFinalize 
 export default function GestisciPage() {
     const { batchId } = useParams<{ batchId: string }>();
     const account = useActiveAccount();
-    // Questa chiamata rimane perché i dati del contributor non sono negli eventi del batch
     const { data: contributorInfo } = useReadContract({ contract, method: "function getContributorInfo(address) view returns (string, uint256, bool)", params: account ? [account.address] : undefined });
 
     const [batchInfo, setBatchInfo] = useState<any>(null);
@@ -211,9 +206,6 @@ export default function GestisciPage() {
     const [txResult, setTxResult] = useState<{ status: 'success' | 'error'; message: string } | null>(null);
     const [isModalOpen, setIsModalOpen] = useState(false);
 
-    // Rimosso l'hook `useReadContract` per `eventCount`
-
-    // --- MODIFICA: SOSTITUZIONE LOGICA DI FETCH CON INSIGHT (API REST) ---
     const fetchBatchData = async () => {
         if (!batchId) return;
         setIsLoading(true);
@@ -222,9 +214,11 @@ export default function GestisciPage() {
         const contractAddress = '0xACa1fA95E1b8C52398BeA2C708be7a164D897450';
         const clientId = 'eda8282e23ee12f17d8d1d20ef8aaa83';
 
-        const initEventSignature = 'BatchInitialized(address,uint256,string,string,string,string,string,string,bool)';
-        const stepEventSignature = 'BatchStepAdded(uint256,uint256,string,string,string,string,string)';
-        const closeEventSignature = 'BatchClosed(address,uint256)';
+        // --- MODIFICA APPORTATA QUI ---
+        // Codifichiamo le firme degli eventi per renderle sicure per l'URL
+        const initEventSignature = encodeURIComponent('BatchInitialized(address,uint256,string,string,string,string,string,string,bool)');
+        const stepEventSignature = encodeURIComponent('BatchStepAdded(uint256,uint256,string,string,string,string,string)');
+        const closeEventSignature = encodeURIComponent('BatchClosed(address,uint256)');
         
         const headers = { 'x-client-id': clientId };
 
