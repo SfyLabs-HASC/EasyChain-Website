@@ -128,7 +128,18 @@ const truncateText = (text: string, maxLength: number) => { if (!text) return te
 
 export default function AziendaPage() {
     const account = useActiveAccount();
-    const { data: contributorData, isLoading: isStatusLoading, refetch: refetchContributorInfo, isError } = useReadContract({ contract, method: "function getContributorInfo(address) view returns (string, uint256, bool)", params: account ? [account.address] : undefined, queryOptions: { enabled: !!account } });
+    
+    // --- FIX 1: DISABILITARE POLLING RPC PER I DATI DEL CONTRIBUTOR ---
+    const { data: contributorData, isLoading: isStatusLoading, refetch: refetchContributorInfo, isError } = useReadContract({ 
+        contract, 
+        method: "function getContributorInfo(address) view returns (string, uint256, bool)", 
+        params: account ? [account.address] : undefined, 
+        queryOptions: { 
+            enabled: !!account,
+            refetchInterval: false // Disabilita l'aggiornamento automatico per risparmiare RPC
+        } 
+    });
+
     const prevAccountRef = useRef(account?.address);
     const { mutate: sendTransaction, isPending } = useSendTransaction();
     const [modal, setModal] = useState<'init' | null>(null);
@@ -151,8 +162,6 @@ export default function AziendaPage() {
         const insightBaseUrl = 'https://polygon.insight.thirdweb.com';
         const contractAddress = '0xACa1fA95E1b8C52398BeA2C708be7a164D897450';
         
-        // --- MODIFICA APPORTATA QUI ---
-        // Codifichiamo la firma dell'evento per renderla sicura per l'URL
         const eventSignature = encodeURIComponent('BatchInitialized(address,uint256,string,string,string,string,string,string,bool)');
         
         const url = new URL(`${insightBaseUrl}/v1/contracts/${contractAddress}/events/${eventSignature}`);
@@ -168,6 +177,11 @@ export default function AziendaPage() {
             });
 
             if (!response.ok) {
+                if (response.status === 404) {
+                    console.log("Nessun evento 'BatchInitialized' trovato. Normale se non ci sono ancora iscrizioni.");
+                    setAllBatches([]);
+                    return;
+                }
                 const errorData = await response.json();
                 throw new Error(errorData.error?.message || 'Fallimento nel recuperare i dati da Insight');
             }
@@ -235,8 +249,34 @@ export default function AziendaPage() {
         setLoadingMessage('Transazione in corso...');
         const transaction = prepareContractCall({ contract, abi, method: "function initializeBatch(string,string,string,string,string)", params: [formData.name, formData.description, formData.date, formData.location, imageIpfsHash] });
         sendTransaction(transaction, { 
-            onSuccess: async () => { setTxResult({ status: 'success', message: 'Iscrizione creata con successo!' }); await Promise.all([fetchAllBatches(), refetchContributorInfo()]); setLoadingMessage(''); },
-            onError: (err) => { setTxResult({ status: 'error', message: err.message.toLowerCase().includes("insufficient funds") ? "Crediti Insufficienti, Ricarica" : "Errore nella transazione." }); setLoadingMessage(''); } 
+            // --- FIX 2: AGGIUNGERE TIMEOUT PER DARE TEMPO A INSIGHT DI INDICIZZARE ---
+            onSuccess: () => { 
+                setTxResult({ status: 'success', message: 'Iscrizione creata con successo!' }); 
+                setLoadingMessage(''); 
+                // Attendi 2.5 secondi prima di aggiornare la lista, per dare tempo a Insight
+                setTimeout(() => {
+                    fetchAllBatches();
+                    refetchContributorInfo(); // Aggiorniamo manualmente anche i crediti
+                }, 2500);
+            },
+            onError: (err) => { 
+                console.error("Dettagli errore transazione:", err);
+                const errorMessage = err.message.toLowerCase();
+                let displayMessage = "Errore generico nella transazione. Controlla la console per i dettagli.";
+
+                if (errorMessage.includes("insufficient funds") || errorMessage.includes("contributor has no credits")) {
+                    displayMessage = "Crediti insufficienti. Per favore, contatta l'amministratore per una ricarica.";
+                } else if (errorMessage.includes("not an active contributor")) {
+                    displayMessage = "Il tuo account non risulta essere un contributor attivo.";
+                } else {
+                    const reasonMatch = err.message.match(/reason="([^"]+)"/);
+                    if (reasonMatch && reasonMatch[1]) {
+                        displayMessage = `Errore: ${reasonMatch[1]}`;
+                    }
+                }
+                setTxResult({ status: 'error', message: displayMessage });
+                setLoadingMessage(''); 
+            } 
         });
     };
     
