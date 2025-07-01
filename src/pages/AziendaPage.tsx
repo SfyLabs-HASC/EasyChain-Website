@@ -129,14 +129,13 @@ const truncateText = (text: string, maxLength: number) => { if (!text) return te
 export default function AziendaPage() {
     const account = useActiveAccount();
     
-    // --- FIX 1: DISABILITARE POLLING RPC PER I DATI DEL CONTRIBUTOR ---
     const { data: contributorData, isLoading: isStatusLoading, refetch: refetchContributorInfo, isError } = useReadContract({ 
         contract, 
         method: "function getContributorInfo(address) view returns (string, uint256, bool)", 
         params: account ? [account.address] : undefined, 
         queryOptions: { 
             enabled: !!account,
-            refetchInterval: false // Disabilita l'aggiornamento automatico per risparmiare RPC
+            refetchInterval: false
         } 
     });
 
@@ -170,6 +169,7 @@ export default function AziendaPage() {
         url.searchParams.append('order', 'desc');
 
         try {
+            console.log("Chiamata a Insight in corso..."); // Log per debug
             const response = await fetch(url.toString(), {
                 headers: {
                     'x-client-id': 'eda8282e23ee12f17d8d1d20ef8aaa83',
@@ -178,7 +178,7 @@ export default function AziendaPage() {
 
             if (!response.ok) {
                 if (response.status === 404) {
-                    console.log("Nessun evento 'BatchInitialized' trovato. Normale se non ci sono ancora iscrizioni.");
+                    console.log("Nessun evento 'BatchInitialized' trovato.");
                     setAllBatches([]);
                     return;
                 }
@@ -187,6 +187,7 @@ export default function AziendaPage() {
             }
 
             const events = await response.json();
+            console.log("Dati ricevuti da Insight:", events); // Log per debug
             
             const formattedBatches = events.map((event: any) => ({
                 id: event.arguments.batchId.toString(),
@@ -249,15 +250,16 @@ export default function AziendaPage() {
         setLoadingMessage('Transazione in corso...');
         const transaction = prepareContractCall({ contract, abi, method: "function initializeBatch(string,string,string,string,string)", params: [formData.name, formData.description, formData.date, formData.location, imageIpfsHash] });
         sendTransaction(transaction, { 
-            // --- FIX 2: AGGIUNGERE TIMEOUT PER DARE TEMPO A INSIGHT DI INDICIZZARE ---
             onSuccess: () => { 
                 setTxResult({ status: 'success', message: 'Iscrizione creata con successo!' }); 
                 setLoadingMessage(''); 
-                // Attendi 2.5 secondi prima di aggiornare la lista, per dare tempo a Insight
+                // --- FIX 2: AUMENTATO TIMEOUT E AGGIUNTO LOG ---
+                console.log("Transazione riuscita. Attendo 4 secondi prima di aggiornare la lista...");
                 setTimeout(() => {
+                    console.log("Timeout terminato. Eseguo il refetch...");
                     fetchAllBatches();
-                    refetchContributorInfo(); // Aggiorniamo manualmente anche i crediti
-                }, 2500);
+                    refetchContributorInfo();
+                }, 4000); // Aumentato a 4 secondi per sicurezza
             },
             onError: (err) => { 
                 console.error("Dettagli errore transazione:", err);
@@ -294,6 +296,15 @@ export default function AziendaPage() {
         return (
             <> 
                 <DashboardHeader contributorInfo={contributorData} onNewInscriptionClick={openModal} /> 
+                
+                {/* --- FIX 3: AGGIUNTO PULSANTE DI AGGIORNAMENTO MANUALE --- */}
+                <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', marginBottom: '1rem', gap: '1rem' }}>
+                    <h3 style={{ margin: 0, color: '#f8f9fa' }}>Le tue Iscrizioni</h3>
+                    <button onClick={() => fetchAllBatches()} className="web3-button secondary" disabled={isLoadingBatches} style={{padding: '8px 16px'}}>
+                        {isLoadingBatches ? 'Aggiornando...' : 'Aggiorna Lista'}
+                    </button>
+                </div>
+
                 {isLoadingBatches ? <p style={{textAlign: 'center', marginTop: '2rem'}}>Caricamento iscrizioni...</p> : <BatchTable batches={filteredBatches} nameFilter={nameFilter} setNameFilter={setNameFilter} locationFilter={locationFilter} setLocationFilter={setLocationFilter} statusFilter={statusFilter} setStatusFilter={setStatusFilter}/>} 
             </>
         ); 
