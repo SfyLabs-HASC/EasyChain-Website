@@ -12,22 +12,30 @@ import TransactionStatusModal from '../components/TransactionStatusModal';
 // --- Stili CSS (invariati) ---
 const AziendaPageStyles = () => (
   <style>{`
-    /* Stili globali per la pagina (omessi per brevità) */
+    /* Stili globali per la pagina */
     .app-container-full { padding: 0 2rem; }
     .main-header-bar { display: flex; justify-content: space-between; align-items: center; }
     .header-title { font-size: 1.75rem; font-weight: bold; }
+    
+    /* Header del Dashboard */
     .dashboard-header-card { display: flex; justify-content: space-between; align-items: center; position: relative; padding: 1.5rem; background-color: #212529; border: 1px solid #495057; border-radius: 8px; margin-bottom: 2rem; }
     .dashboard-header-info { display: flex; flex-direction: column; }
     .company-name-header { margin-top: 0; margin-bottom: 1rem; font-size: 3rem; }
     .company-status-container { display: flex; align-items: center; gap: 1.5rem; }
     .status-item { display: flex; align-items: center; gap: 0.5rem; }
     .header-actions .web3-button.large { padding: 1rem 2rem; font-size: 1.1rem; }
+
+    /* Tabella e righe per Desktop */
     .company-table .desktop-row { display: table-row; }
     .company-table .mobile-card { display: none; }
     .pagination-controls { display: flex; justify-content: space-between; align-items: center; margin-top: 1rem; }
+
+    /* Stili per il riepilogo nel modal */
     .recap-summary { text-align: left; padding: 15px; background-color: #2a2a2a; border: 1px solid #444; border-radius: 8px; margin-bottom: 20px;}
     .recap-summary p { margin: 8px 0; word-break: break-word; }
     .recap-summary p strong { color: #f8f9fa; }
+
+    /* Media Query per dispositivi mobili (max-width: 768px) */
     @media (max-width: 768px) {
         .app-container-full { padding: 0 1rem; }
         .main-header-bar { flex-direction: column; align-items: flex-start; gap: 1rem; }
@@ -38,11 +46,13 @@ const AziendaPageStyles = () => (
         .company-status-container { flex-direction: column; align-items: flex-start; gap: 0.75rem; }
         .header-actions { width: 100%; }
         .header-actions .web3-button.large { width: 100%; font-size: 1rem; }
+        
         .company-table thead { display: none; }
         .company-table .desktop-row { display: none; }
         .company-table tbody, .company-table tr, .company-table td { display: block; width: 100%; }
         .company-table tr { margin-bottom: 1rem; }
         .company-table td[colspan="7"] { padding: 20px; text-align: center; border: 1px solid #495057; border-radius: 8px; }
+        
         .mobile-card { display: block; border: 1px solid #495057; border-radius: 8px; padding: 1rem; margin-bottom: 1rem; background-color: #2c3e50; }
         .mobile-card .card-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.75rem; border-bottom: 1px solid #495057; padding-bottom: 0.75rem; }
         .mobile-card .card-header strong { font-size: 1.1rem; }
@@ -59,7 +69,7 @@ const client = createThirdwebClient({ clientId: "eda8282e23ee12f17d8d1d20ef8aaa8
 const contract = getContract({ 
   client, 
   chain: polygon,
-  address: "0xACa1fA95E1b8C52398BeA2C708be7a164D897450"
+  address: "0x2Bd72307a73cC7BE3f275a81c8eDBE775bB08F3E"
 });
 
 const RegistrationForm = () => ( <div className="card"><h3>Benvenuto su Easy Chain!</h3><p>Il tuo account non è ancora attivo. Compila il form di registrazione per inviare una richiesta di attivazione.</p></div> );
@@ -135,7 +145,7 @@ export default function AziendaPage() {
         params: account ? [account.address] : undefined, 
         queryOptions: { 
             enabled: !!account,
-            refetchInterval: false
+            refetchInterval: false 
         } 
     });
 
@@ -159,7 +169,7 @@ export default function AziendaPage() {
         setIsLoadingBatches(true);
 
         const insightBaseUrl = 'https://polygon.insight.thirdweb.com';
-        const contractAddress = '0xACa1fA95E1b8C52398BeA2C708be7a164D897450';
+        const contractAddress = '0x2Bd72307a73cC7BE3f275a81c8eDBE775bB08F3E';
         
         const eventSignature = encodeURIComponent('BatchInitialized(address,uint256,string,string,string,string,string,string,bool)');
         
@@ -169,7 +179,7 @@ export default function AziendaPage() {
         url.searchParams.append('order', 'desc');
 
         try {
-            console.log("Chiamata a Insight in corso..."); // Log per debug
+            console.log("Chiamata a Insight in corso...");
             const response = await fetch(url.toString(), {
                 headers: {
                     'x-client-id': 'eda8282e23ee12f17d8d1d20ef8aaa83',
@@ -178,7 +188,7 @@ export default function AziendaPage() {
 
             if (!response.ok) {
                 if (response.status === 404) {
-                    console.log("Nessun evento 'BatchInitialized' trovato.");
+                    console.log("Nessun evento 'BatchInitialized' trovato. Normale se non ci sono ancora iscrizioni.");
                     setAllBatches([]);
                     return;
                 }
@@ -187,7 +197,7 @@ export default function AziendaPage() {
             }
 
             const events = await response.json();
-            console.log("Dati ricevuti da Insight:", events); // Log per debug
+            console.log("Dati ricevuti da Insight:", events);
             
             const formattedBatches = events.map((event: any) => ({
                 id: event.arguments.batchId.toString(),
@@ -253,13 +263,12 @@ export default function AziendaPage() {
             onSuccess: () => { 
                 setTxResult({ status: 'success', message: 'Iscrizione creata con successo!' }); 
                 setLoadingMessage(''); 
-                // --- FIX 2: AUMENTATO TIMEOUT E AGGIUNTO LOG ---
                 console.log("Transazione riuscita. Attendo 4 secondi prima di aggiornare la lista...");
                 setTimeout(() => {
                     console.log("Timeout terminato. Eseguo il refetch...");
                     fetchAllBatches();
                     refetchContributorInfo();
-                }, 4000); // Aumentato a 4 secondi per sicurezza
+                }, 4000);
             },
             onError: (err) => { 
                 console.error("Dettagli errore transazione:", err);
@@ -297,7 +306,6 @@ export default function AziendaPage() {
             <> 
                 <DashboardHeader contributorInfo={contributorData} onNewInscriptionClick={openModal} /> 
                 
-                {/* --- FIX 3: AGGIUNTO PULSANTE DI AGGIORNAMENTO MANUALE --- */}
                 <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', marginBottom: '1rem', gap: '1rem' }}>
                     <h3 style={{ margin: 0, color: '#f8f9fa' }}>Le tue Iscrizioni</h3>
                     <button onClick={() => fetchAllBatches()} className="web3-button secondary" disabled={isLoadingBatches} style={{padding: '8px 16px'}}>
