@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Link } from 'react-router-dom';
 import { ConnectButton, useActiveAccount, useReadContract, useSendTransaction } from 'thirdweb/react';
-import { createThirdwebClient, getContract, prepareContractCall } from 'thirdweb';
+import { createThirdwebClient, getContract, prepareContractCall, keccak256, toHex, pad } from 'thirdweb';
 import { polygon } from 'thirdweb/chains';
 import { inAppWallet } from 'thirdweb/wallets';
 import { supplyChainABI as abi } from '../abi/contractABI';
@@ -68,7 +68,7 @@ interface BatchData { id: string; batchId: bigint; name: string; description: st
 
 const BatchRow = ({ batch, localId }: { batch: BatchData; localId: number }) => {
     const [showDescription, setShowDescription] = useState(false);
-    const { data: stepCount } = useReadContract({ contract, abi, method: "function getBatchStepCount(uint256 _batchId) view returns (uint256)", params: [batch.batchId] });
+    const { data: stepCount } = useReadContract({ contract, method: "function getBatchStepCount(uint256 _batchId) view returns (uint256)", params: [batch.batchId] });
     const formatDate = (dateStr: string | undefined) => !dateStr || dateStr.split('-').length !== 3 ? '/' : dateStr.split('-').reverse().join('/');
     return (
         <>
@@ -154,23 +154,36 @@ export default function AziendaPage() {
     const [loadingMessage, setLoadingMessage] = useState('');
     const [currentStep, setCurrentStep] = useState(1);
 
+    // =================================================================================
+    // --- FUNZIONE CORRETTA ---
+    // =================================================================================
     const fetchAllBatches = async () => {
         if (!account?.address) return;
         setIsLoadingBatches(true);
 
-        const insightBaseUrl = 'https://polygon.insight.thirdweb.com';
+        // --- 1. Impostazioni per la chiamata API
+        const insightBaseUrl = 'https://137.insight.thirdweb.com';
         const contractAddress = '0x2Bd72307a73cC7BE3f275a81c8eDBE775bB08F3E';
         
-        const eventSignature = encodeURIComponent('BatchInitialized(address,uint256,string,string,string,string,string,string,bool)');
+        // --- 2. Calcolo dei "topics" per il filtro
+        // Topic0 è l'hash della firma dell'evento
+        const eventSignature = 'BatchInitialized(address,uint256,string,string,string,string,string,string,bool)';
+        const eventTopic0 = keccak256(toHex(eventSignature));
         
-        // --- FIX: URL CORRETTO ---
-        // Rimosso "/contracts" dal percorso
-        const url = new URL(`${insightBaseUrl}/v1/events/${contractAddress}/${eventSignature}`);
-        
-        url.searchParams.append('contributor', account.address);
-        url.searchParams.append('order', 'desc');
+        // Topic1 è il primo parametro indicizzato (in questo caso, l'indirizzo del contributor)
+        // Deve essere "padded" a 32 bytes (64 caratteri hex + '0x')
+        const eventTopic1 = pad(account.address, { size: 32, dir: 'left' });
+
+        // --- 3. Costruzione dell'URL con i parametri corretti
+        const url = new URL(`${insightBaseUrl}/v1/events`);
+        url.searchParams.append('filter_address', contractAddress);
+        url.searchParams.append('filter_topic_0', eventTopic0);
+        url.searchParams.append('filter_topic_1', eventTopic1);
+        url.searchParams.append('decode', 'true'); // Chiedi a Insight di decodificare i log
+        url.searchParams.append('sort_order', 'desc'); // Parametro corretto per l'ordinamento
 
         try {
+            // --- 4. Chiamata API con header di autenticazione
             const response = await fetch(url.toString(), {
                 headers: {
                     'x-client-id': 'eda8282e23ee12f17d8d1d20ef8aaa83',
@@ -184,22 +197,29 @@ export default function AziendaPage() {
                     return;
                 }
                 const errorData = await response.json();
-                throw new Error(errorData.error?.message || 'Fallimento nel recuperare i dati da Insight');
+                throw new Error(errorData.error?.message || `Errore da Insight API: ${response.statusText}`);
             }
-
-            const events = await response.json();
             
-            const formattedBatches = events.map((event: any) => ({
-                id: event.arguments.batchId.toString(),
-                batchId: BigInt(event.arguments.batchId),
-                name: event.arguments.name,
-                description: event.arguments.description,
-                date: event.arguments.date,
-                location: event.arguments.location,
-                imageIpfsHash: event.arguments.imageIpfsHash,
-                contributorName: event.arguments.contributorName,
-                isClosed: event.arguments.isClosed,
-            }));
+            const result = await response.json();
+            const events = result.data || [];
+            
+            // --- 5. Parsing della risposta strutturata
+            const formattedBatches = events.map((event: any) => {
+                // Combina i parametri indicizzati e non per facilità d'uso
+                const args = { ...event.decoded.indexed_params, ...event.decoded.non_indexed_params };
+                
+                return {
+                    id: args.batchId.toString(),
+                    batchId: BigInt(args.batchId),
+                    name: args.name,
+                    description: args.description,
+                    date: args.date,
+                    location: args.location,
+                    imageIpfsHash: args.imageIpfsHash,
+                    contributorName: args.contributorName,
+                    isClosed: args.isClosed,
+                };
+            });
             
             setAllBatches(formattedBatches);
         } catch (error) {
@@ -209,6 +229,7 @@ export default function AziendaPage() {
             setIsLoadingBatches(false);
         }
     };
+    // =================================================================================
 
     useEffect(() => {
         if (account?.address && prevAccountRef.current !== account.address) { refetchContributorInfo(); fetchAllBatches(); } 
@@ -248,7 +269,7 @@ export default function AziendaPage() {
             } catch (error: any) { setTxResult({ status: 'error', message: `Errore caricamento: ${error.message}` }); setLoadingMessage(''); return; }
         }
         setLoadingMessage('Transazione in corso...');
-        const transaction = prepareContractCall({ contract, abi, method: "function initializeBatch(string,string,string,string,string)", params: [formData.name, formData.description, formData.date, formData.location, imageIpfsHash] });
+        const transaction = prepareContractCall({ contract, method: "function initializeBatch(string,string,string,string,string)", params: [formData.name, formData.description, formData.date, formData.location, imageIpfsHash] });
         sendTransaction(transaction, { 
             onSuccess: () => { 
                 setTxResult({ status: 'success', message: 'Iscrizione creata con successo!' }); 
@@ -321,10 +342,10 @@ export default function AziendaPage() {
                     <div className="modal-content" onClick={(e) => e.stopPropagation()}>
                         <div className="modal-header"><h2>Nuova Iscrizione ({currentStep}/6)</h2></div>
                         <div className="modal-body" style={{ minHeight: '350px' }}>
-                            {/* ... JSX del modale invariato ... */}
+                            { /* ... JSX del modale invariato ... */ }
                         </div>
                         <div className="modal-footer" style={{ justifyContent: 'space-between' }}>
-                            {/* ... JSX del footer del modale invariato ... */}
+                           { /* ... JSX del footer del modale invariato ... */ }
                         </div>
                     </div>
                 </div> 
