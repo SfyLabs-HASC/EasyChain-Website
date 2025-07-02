@@ -12,30 +12,22 @@ import TransactionStatusModal from '../components/TransactionStatusModal';
 // --- Stili CSS (invariati) ---
 const AziendaPageStyles = () => (
   <style>{`
-    /* Stili globali per la pagina */
+    /* Stili globali per la pagina (omessi per brevità) */
     .app-container-full { padding: 0 2rem; }
     .main-header-bar { display: flex; justify-content: space-between; align-items: center; }
     .header-title { font-size: 1.75rem; font-weight: bold; }
-    
-    /* Header del Dashboard */
     .dashboard-header-card { display: flex; justify-content: space-between; align-items: center; position: relative; padding: 1.5rem; background-color: #212529; border: 1px solid #495057; border-radius: 8px; margin-bottom: 2rem; }
     .dashboard-header-info { display: flex; flex-direction: column; }
     .company-name-header { margin-top: 0; margin-bottom: 1rem; font-size: 3rem; }
     .company-status-container { display: flex; align-items: center; gap: 1.5rem; }
     .status-item { display: flex; align-items: center; gap: 0.5rem; }
     .header-actions .web3-button.large { padding: 1rem 2rem; font-size: 1.1rem; }
-
-    /* Tabella e righe per Desktop */
     .company-table .desktop-row { display: table-row; }
     .company-table .mobile-card { display: none; }
     .pagination-controls { display: flex; justify-content: space-between; align-items: center; margin-top: 1rem; }
-
-    /* Stili per il riepilogo nel modal */
     .recap-summary { text-align: left; padding: 15px; background-color: #2a2a2a; border: 1px solid #444; border-radius: 8px; margin-bottom: 20px;}
     .recap-summary p { margin: 8px 0; word-break: break-word; }
     .recap-summary p strong { color: #f8f9fa; }
-
-    /* Media Query per dispositivi mobili (max-width: 768px) */
     @media (max-width: 768px) {
         .app-container-full { padding: 0 1rem; }
         .main-header-bar { flex-direction: column; align-items: flex-start; gap: 1rem; }
@@ -46,13 +38,11 @@ const AziendaPageStyles = () => (
         .company-status-container { flex-direction: column; align-items: flex-start; gap: 0.75rem; }
         .header-actions { width: 100%; }
         .header-actions .web3-button.large { width: 100%; font-size: 1rem; }
-        
         .company-table thead { display: none; }
         .company-table .desktop-row { display: none; }
         .company-table tbody, .company-table tr, .company-table td { display: block; width: 100%; }
         .company-table tr { margin-bottom: 1rem; }
         .company-table td[colspan="7"] { padding: 20px; text-align: center; border: 1px solid #495057; border-radius: 8px; }
-        
         .mobile-card { display: block; border: 1px solid #495057; border-radius: 8px; padding: 1rem; margin-bottom: 1rem; background-color: #2c3e50; }
         .mobile-card .card-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.75rem; border-bottom: 1px solid #495057; padding-bottom: 0.75rem; }
         .mobile-card .card-header strong { font-size: 1.1rem; }
@@ -145,7 +135,7 @@ export default function AziendaPage() {
         params: account ? [account.address] : undefined, 
         queryOptions: { 
             enabled: !!account,
-            refetchInterval: false 
+            refetchInterval: false
         } 
     });
 
@@ -170,50 +160,59 @@ export default function AziendaPage() {
 
         const insightBaseUrl = 'https://polygon.insight.thirdweb.com';
         const contractAddress = '0x2Bd72307a73cC7BE3f275a81c8eDBE775bB08F3E';
-        
-        const eventSignature = encodeURIComponent('BatchInitialized(address,uint256,string,string,string,string,string,string,bool)');
-        
-        const url = new URL(`${insightBaseUrl}/v1/contracts/${contractAddress}/events/${eventSignature}`);
-        
-        url.searchParams.append('contributor', account.address);
-        url.searchParams.append('order', 'desc');
+        const headers = { 'x-client-id': 'eda8282e23ee12f17d8d1d20ef8aaa83' };
+
+        // --- CODICE DIAGNOSTICO ---
+        const richEventSignature = encodeURIComponent('BatchInitialized(address,uint256,string,string,string,string,string,string,bool)');
+        const poorEventSignature = encodeURIComponent('BatchInitialized(address,uint256,string)'); // Vecchia firma per test
+
+        const richUrl = new URL(`${insightBaseUrl}/v1/contracts/${contractAddress}/events/${richEventSignature}`);
+        richUrl.searchParams.append('contributor', account.address);
+        richUrl.searchParams.append('order', 'desc');
+
+        const poorUrl = new URL(`${insightBaseUrl}/v1/contracts/${contractAddress}/events/${poorEventSignature}`);
+        poorUrl.searchParams.append('contributor', account.address);
+        poorUrl.searchParams.append('order', 'desc');
 
         try {
-            console.log("Chiamata a Insight in corso...");
-            const response = await fetch(url.toString(), {
-                headers: {
-                    'x-client-id': 'eda8282e23ee12f17d8d1d20ef8aaa83',
-                }
-            });
+            console.log("--- INIZIO TEST DIAGNOSTICO INSIGHT ---");
+            console.log("1. Tento di caricare gli eventi 'ricchi' (quelli corretti)...");
+            const richResponse = await fetch(richUrl.toString(), { headers });
+            console.log(`Risposta per evento ricco: ${richResponse.status} ${richResponse.statusText}`);
 
-            if (!response.ok) {
-                if (response.status === 404) {
-                    console.log("Nessun evento 'BatchInitialized' trovato. Normale se non ci sono ancora iscrizioni.");
+            if (richResponse.ok) {
+                const events = await richResponse.json();
+                console.log("SUCCESSO! Trovati eventi ricchi:", events);
+                const formattedBatches = events.map((event: any) => ({
+                    id: event.arguments.batchId.toString(),
+                    batchId: BigInt(event.arguments.batchId),
+                    name: event.arguments.name,
+                    description: event.arguments.description,
+                    date: event.arguments.date,
+                    location: event.arguments.location,
+                    imageIpfsHash: event.arguments.imageIpfsHash,
+                    contributorName: event.arguments.contributorName,
+                    isClosed: event.arguments.isClosed,
+                }));
+                setAllBatches(formattedBatches);
+            } else {
+                console.log("2. Chiamata per evento 'ricco' fallita. Tento di caricare gli eventi 'poveri' per diagnosi...");
+                const poorResponse = await fetch(poorUrl.toString(), { headers });
+                console.log(`Risposta per evento povero: ${poorResponse.status} ${poorResponse.statusText}`);
+
+                if (poorResponse.ok) {
+                    const events = await poorResponse.json();
+                    console.error("DIAGNOSI CONFERMATA: Trovati solo eventi 'poveri'. Questo significa che la versione del contratto deployata è quella vecchia. È necessario fare il deploy del contratto aggiornato.", events);
+                    alert("Errore di configurazione: la versione del contratto sulla blockchain non è aggiornata. Controlla la console per i dettagli.");
                     setAllBatches([]);
-                    return;
+                } else {
+                    console.error("DIAGNOSI: Entrambe le chiamate sono fallite. L'evento 'BatchInitialized' potrebbe non essere mai stato emesso, oppure c'è un problema con la configurazione di Insight o del Paymaster.");
+                    alert("Errore: Impossibile caricare i dati da Insight. Controlla la console per i dettagli.");
+                    setAllBatches([]);
                 }
-                const errorData = await response.json();
-                throw new Error(errorData.error?.message || 'Fallimento nel recuperare i dati da Insight');
             }
-
-            const events = await response.json();
-            console.log("Dati ricevuti da Insight:", events);
-            
-            const formattedBatches = events.map((event: any) => ({
-                id: event.arguments.batchId.toString(),
-                batchId: BigInt(event.arguments.batchId),
-                name: event.arguments.name,
-                description: event.arguments.description,
-                date: event.arguments.date,
-                location: event.arguments.location,
-                imageIpfsHash: event.arguments.imageIpfsHash,
-                contributorName: event.arguments.contributorName,
-                isClosed: event.arguments.isClosed,
-            }));
-            
-            setAllBatches(formattedBatches);
         } catch (error) {
-            console.error("Errore nel caricare le iscrizioni da Insight (REST API):", error);
+            console.error("Errore critico durante la chiamata a Insight:", error);
             setAllBatches([]);
         } finally {
             setIsLoadingBatches(false);
