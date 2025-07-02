@@ -7,13 +7,15 @@ import { supplyChainABI as abi } from '../abi/contractABI';
 import '../App.css';
 import TransactionStatusModal from '../components/TransactionStatusModal';
 
+// --- MODIFICA: AGGIORNAMENTO CLIENT ID E INDIRIZZO CONTRATTO ---
 const client = createThirdwebClient({ clientId: "eda8282e23ee12f17d8d1d20ef8aaa83" });
 const contract = getContract({ 
   client, 
   chain: polygon,
-  address: "0xACa1fA95E1b8C52398BeA2C708be7a164D897450"
+  address: "0x2Bd72307a73cC7BE3f275a81c8eDBE775bB08F3E"
 });
 
+// --- MODIFICA: Componente aggiornato per leggere da un oggetto (es. eventoInfo.eventName) ---
 const EventoCard = ({ eventoInfo }: { eventoInfo: any }) => (
     <div className="card" style={{backgroundColor: '#343a40', color: '#f8f9fa', marginTop: '1rem'}}>
         <h4>{eventoInfo.eventName}</h4>
@@ -158,6 +160,7 @@ const GestisciPageHeader = ({ contributorInfo }: { contributorInfo: any }) => {
 
 const ImagePlaceholder = () => ( <div style={{width:'150px',height:'150px',flexShrink:0,backgroundColor:'#f0f0f0',border:'1px solid #ddd',borderRadius:'8px',display:'flex',flexDirection:'column',justifyContent:'center',alignItems:'center',color:'#a0a0a0',textAlign:'center'}}><svg xmlns="http://www.w3.org/2000/svg" width="40" height="40" fill="currentColor" viewBox="0 0 16 16"><path d="M6.002 5.5a1.5 1.5 0 1 1-3 0 1.5 1.5 0 0 1 3 0z"/><path d="M2.002 1a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V3a2 2 0 0 0-2-2h-12zm12 1a1 1 0 0 1 1 1v6.5l-3.777-1.947a.5.5 0 0 0-.577.093l-3.71 3.71-2.66-1.772a.5.5 0 0 0-.63.062L1.002 12V3a1 1 0 0 1 1-1h12z"/></svg><div style={{fontSize:'0.8rem',marginTop:'5px',fontWeight:'bold'}}>NO IMAGE<br/>AVAILABLE</div></div> );
 
+// --- MODIFICA: Componente aggiornato per leggere da un oggetto (es. batchInfo.name) ---
 const BatchSummaryCard = ({ batchInfo, eventCount, onAddEventoClick, onFinalize }: { batchInfo: any, eventCount: number, onAddEventoClick: () => void, onFinalize: () => void }) => {
     if(!batchInfo) return null;
     
@@ -206,30 +209,30 @@ export default function GestisciPage() {
     const [txResult, setTxResult] = useState<{ status: 'success' | 'error'; message: string } | null>(null);
     const [isModalOpen, setIsModalOpen] = useState(false);
 
+    // --- MODIFICA: SOSTITUZIONE LOGICA DI FETCH CON INSIGHT (API REST) ---
     const fetchBatchData = async () => {
         if (!batchId) return;
         setIsLoading(true);
 
         const insightBaseUrl = 'https://polygon.insight.thirdweb.com';
-        const contractAddress = '0xACa1fA95E1b8C52398BeA2C708be7a164D897450';
+        const contractAddress = '0x2Bd72307a73cC7BE3f275a81c8eDBE775bB08F3E';
         const clientId = 'eda8282e23ee12f17d8d1d20ef8aaa83';
 
-        // --- MODIFICA APPORTATA QUI ---
-        // Codifichiamo le firme degli eventi per renderle sicure per l'URL
         const initEventSignature = encodeURIComponent('BatchInitialized(address,uint256,string,string,string,string,string,string,bool)');
         const stepEventSignature = encodeURIComponent('BatchStepAdded(uint256,uint256,string,string,string,string,string)');
         const closeEventSignature = encodeURIComponent('BatchClosed(address,uint256)');
         
         const headers = { 'x-client-id': clientId };
 
-        const initUrl = new URL(`${insightBaseUrl}/v1/contracts/${contractAddress}/events/${initEventSignature}`);
+        // --- FIX: URL CORRETTO ---
+        const initUrl = new URL(`${insightBaseUrl}/v1/events/${contractAddress}/${initEventSignature}`);
         initUrl.searchParams.append('batchId', batchId);
 
-        const stepsUrl = new URL(`${insightBaseUrl}/v1/contracts/${contractAddress}/events/${stepEventSignature}`);
+        const stepsUrl = new URL(`${insightBaseUrl}/v1/events/${contractAddress}/${stepEventSignature}`);
         stepsUrl.searchParams.append('batchId', batchId);
         stepsUrl.searchParams.append('order', 'desc');
 
-        const closeUrl = new URL(`${insightBaseUrl}/v1/contracts/${contractAddress}/events/${closeEventSignature}`);
+        const closeUrl = new URL(`${insightBaseUrl}/v1/events/${contractAddress}/${closeEventSignature}`);
         closeUrl.searchParams.append('batchId', batchId);
 
         try {
@@ -239,25 +242,38 @@ export default function GestisciPage() {
                 fetch(closeUrl.toString(), { headers })
             ]);
 
-            if (!initResponse.ok || !stepsResponse.ok || !closeResponse.ok) {
-                console.error("Init Status:", initResponse.status, "Steps Status:", stepsResponse.status, "Close Status:", closeResponse.status);
-                throw new Error("Una delle chiamate a Insight è fallita.");
+            if (!initResponse.ok) {
+                 // Gestisce il caso 404 senza bloccare tutto
+                if(initResponse.status === 404) {
+                    console.warn("Nessun evento BatchInitialized trovato per questo ID.");
+                    setBatchInfo(null); // Pulisce i dati vecchi
+                } else {
+                    throw new Error(`Chiamata per BatchInitialized fallita: ${initResponse.statusText}`);
+                }
+            } else {
+                const initEvents = await initResponse.json();
+                const mainInfo = initEvents[0]?.arguments;
+                if (mainInfo) {
+                    const closeEvents = await closeResponse.json();
+                    setBatchInfo({
+                        ...mainInfo,
+                        isClosed: closeEvents.length > 0
+                    });
+                }
             }
 
-            const initEvents = await initResponse.json();
-            const stepEvents = await stepsResponse.json();
-            const closeEvents = await closeResponse.json();
-
-            const mainInfo = initEvents[0]?.arguments;
-            if (mainInfo) {
-                setBatchInfo({
-                    ...mainInfo,
-                    isClosed: closeEvents.length > 0
-                });
+            if(stepsResponse.ok) {
+                const stepEvents = await stepsResponse.json();
+                const formattedSteps = stepEvents.map((event: any) => event.arguments);
+                setEventi(formattedSteps);
+            } else {
+                 if(stepsResponse.status === 404) {
+                    console.log("Nessun evento BatchStepAdded trovato.");
+                    setEventi([]);
+                 } else {
+                    throw new Error(`Chiamata per BatchStepAdded fallita: ${stepsResponse.statusText}`);
+                 }
             }
-
-            const formattedSteps = stepEvents.map((event: any) => event.arguments);
-            setEventi(formattedSteps);
 
         } catch (error) {
             console.error("Errore nel caricare i dati del batch da Insight:", error);
@@ -276,7 +292,10 @@ export default function GestisciPage() {
         
         const transaction = prepareContractCall({ contract, abi, method: "function closeBatch(uint256 _batchId)", params: [BigInt(batchId)] });
         sendTransaction(transaction, {
-            onSuccess: () => { setTxResult({ status: 'success', message: 'Iscrizione finalizzata con successo!' }); fetchBatchData(); },
+            onSuccess: () => { 
+                setTxResult({ status: 'success', message: 'Iscrizione finalizzata con successo!' }); 
+                setTimeout(() => fetchBatchData(), 2500); // Attendi per l'indicizzazione
+            },
             onError: (err) => setTxResult({ status: 'error', message: `Errore: ${err.message}` })
         });
     };
@@ -284,7 +303,7 @@ export default function GestisciPage() {
     const handleAddEventoSuccess = () => {
         setTxResult({ status: 'success', message: 'Evento aggiunto con successo!' });
         setIsModalOpen(false);
-        fetchBatchData(); // Ricarica i dati da Insight
+        setTimeout(() => fetchBatchData(), 2500); // Attendi per l'indicizzazione
     };
 
     return (
