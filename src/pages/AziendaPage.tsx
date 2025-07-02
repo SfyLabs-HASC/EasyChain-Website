@@ -126,8 +126,8 @@ export default function AziendaPage() {
         
         const url = new URL(`${insightBaseUrl}/v1/events/${contractAddress}/${eventSignature}`);
         
-        url.searchParams.append('contributor', account.address);
-        // --- FIX: Corretto il nome del parametro per l'ordinamento ---
+        // --- FIX: Corretto il nome del parametro di filtro ---
+        url.searchParams.append('filter_topic_1', account.address);
         url.searchParams.append('sort_order', 'desc');
 
         try {
