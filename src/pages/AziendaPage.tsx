@@ -385,13 +385,12 @@ const AziendaPage = () => {
     const [statusFilter, setStatusFilter] = useState('all');
     const [loadingMessage, setLoadingMessage] = useState('');
 
-    // --- FUNZIONE CORRETTA ---
+    // --- FUNZIONE CORRETTA E RESILIENTE ---
     const fetchAllBatches = async () => {
         if (!account?.address) return;
         setIsLoadingBatches(true);
 
         try {
-            // Chiama la nostra API Route sicura invece dell'API di Thirdweb
             const response = await fetch(`/api/getBatches?address=${account.address}`);
 
             if (!response.ok) {
@@ -400,27 +399,46 @@ const AziendaPage = () => {
             }
             
             const events = await response.json();
+
+            // Aggiunto controllo per verificare che la risposta sia un array
+            if (!Array.isArray(events)) {
+                console.error("La risposta dell'API non è un array:", events);
+                setAllBatches([]);
+                return;
+            }
             
-            // Mappiamo i dati ricevuti dal nostro server nel formato che il nostro UI si aspetta
-            const formattedBatches = events.map((event: any): BatchData => {
-                const args = event.data; // I dati decodificati sono nel campo 'data'
-                return {
-                    id: event.id, // Usiamo l'ID univoco dell'evento fornito da Insight per la chiave React
-                    batchId: BigInt(args.batchId),
-                    name: args.name,
-                    description: args.description,
-                    date: args.date,
-                    location: args.location,
-                    imageIpfsHash: args.imageIpfsHash,
-                    contributorName: args.contributorName,
-                    isClosed: args.isClosed,
-                };
-            });
+            // Mappiamo i dati in modo sicuro, scartando gli eventi malformati
+            const formattedBatches = events
+                .map((event: any): BatchData | null => {
+                    // Controlla che l'evento e i dati essenziali esistano
+                    if (!event || !event.data || event.data.batchId === undefined || event.data.batchId === null) {
+                        console.warn("Evento scartato per dati mancanti o malformati:", event);
+                        return null; // Scarta questo evento
+                    }
+                    const args = event.data;
+                    try {
+                        return {
+                            id: event.transaction_hash || `${Date.now()}-${Math.random()}`, // Usa una chiave React stabile e univoca
+                            batchId: BigInt(args.batchId),
+                            name: args.name || "Senza nome",
+                            description: args.description || "Nessuna descrizione.",
+                            date: args.date || "",
+                            location: args.location || "N/A",
+                            imageIpfsHash: args.imageIpfsHash || "",
+                            contributorName: args.contributorName || "Sconosciuto",
+                            isClosed: !!args.isClosed, // Assicura che sia sempre un booleano
+                        };
+                    } catch (e) {
+                        console.error("Impossibile processare l'evento, batchId non valido:", args.batchId, event);
+                        return null; // Scarta l'evento se la conversione a BigInt fallisce
+                    }
+                })
+                .filter((b): b is BatchData => b !== null); // Rimuovi tutti gli eventi scartati (null)
             
             setAllBatches(formattedBatches);
         } catch (error) {
             console.error("Errore nel caricare le iscrizioni:", error);
-            setAllBatches([]); // Pulisce i dati in caso di errore
+            setAllBatches([]); // Pulisce i dati in caso di errore per evitare crash
         } finally {
             setIsLoadingBatches(false);
         }
