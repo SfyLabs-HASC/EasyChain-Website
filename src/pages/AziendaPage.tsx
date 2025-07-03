@@ -385,7 +385,6 @@ const AziendaPage = () => {
     const [statusFilter, setStatusFilter] = useState('all');
     const [loadingMessage, setLoadingMessage] = useState('');
 
-    // --- FUNZIONE CORRETTA E RESILIENTE ---
     const fetchAllBatches = async () => {
         if (!account?.address) return;
         setIsLoadingBatches(true);
@@ -400,25 +399,22 @@ const AziendaPage = () => {
             
             const events = await response.json();
 
-            // Aggiunto controllo per verificare che la risposta sia un array
             if (!Array.isArray(events)) {
                 console.error("La risposta dell'API non è un array:", events);
                 setAllBatches([]);
                 return;
             }
             
-            // Mappiamo i dati in modo sicuro, scartando gli eventi malformati
             const formattedBatches = events
                 .map((event: any): BatchData | null => {
-                    // Controlla che l'evento e i dati essenziali esistano
                     if (!event || !event.data || event.data.batchId === undefined || event.data.batchId === null) {
                         console.warn("Evento scartato per dati mancanti o malformati:", event);
-                        return null; // Scarta questo evento
+                        return null;
                     }
                     const args = event.data;
                     try {
                         return {
-                            id: event.transaction_hash || `${Date.now()}-${Math.random()}`, // Usa una chiave React stabile e univoca
+                            id: event.transaction_hash || `${Date.now()}-${Math.random()}`,
                             batchId: BigInt(args.batchId),
                             name: args.name || "Senza nome",
                             description: args.description || "Nessuna descrizione.",
@@ -426,19 +422,19 @@ const AziendaPage = () => {
                             location: args.location || "N/A",
                             imageIpfsHash: args.imageIpfsHash || "",
                             contributorName: args.contributorName || "Sconosciuto",
-                            isClosed: !!args.isClosed, // Assicura che sia sempre un booleano
+                            isClosed: !!args.isClosed,
                         };
                     } catch (e) {
                         console.error("Impossibile processare l'evento, batchId non valido:", args.batchId, event);
-                        return null; // Scarta l'evento se la conversione a BigInt fallisce
+                        return null;
                     }
                 })
-                .filter((b): b is BatchData => b !== null); // Rimuovi tutti gli eventi scartati (null)
+                .filter((b): b is BatchData => b !== null);
             
             setAllBatches(formattedBatches);
         } catch (error) {
             console.error("Errore nel caricare le iscrizioni:", error);
-            setAllBatches([]); // Pulisce i dati in caso di errore per evitare crash
+            setAllBatches([]);
         } finally {
             setIsLoadingBatches(false);
         }
@@ -491,7 +487,7 @@ const AziendaPage = () => {
                 setTimeout(() => {
                     fetchAllBatches();
                     refetchContributorInfo();
-                }, 4000); // Attendi un po' per dare tempo all'indicizzazione
+                }, 4000);
             },
             onError: (err) => { 
                 console.error("Dettagli errore transazione:", err);
@@ -529,10 +525,30 @@ const AziendaPage = () => {
         ); 
     }
     
+    // --- FUNZIONE DI RENDER CORRETTA E RESILIENTE ---
     const renderDashboardContent = () => { 
-        if (isStatusLoading) return <p style={{textAlign: 'center', marginTop: '4rem'}}>Verifica stato account...</p>; 
-        if (isError || !contributorData) return <p style={{textAlign: 'center', marginTop: '4rem', color: 'red'}}>Errore nel recuperare i dati dell'account. Riprova.</p>
-        if (!contributorData[2]) return <RegistrationForm />; 
+        // 1. Gestisci prima lo stato di caricamento
+        if (isStatusLoading) {
+            return <p style={{textAlign: 'center', marginTop: '4rem'}}>Verifica stato account...</p>; 
+        }
+
+        // 2. Gestisci lo stato di errore
+        if (isError) {
+            return <p style={{textAlign: 'center', marginTop: '4rem', color: 'red'}}>Errore nel recuperare i dati dell'account. Riprova.</p>
+        }
+
+        // 3. Gestisci il caso in cui i dati non sono ancora disponibili (ma non c'è errore né caricamento)
+        // Questo è il controllo cruciale per prevenire il crash.
+        if (!contributorData) {
+            return <p style={{textAlign: 'center', marginTop: '4rem'}}>Caricamento dati account...</p>;
+        }
+
+        // 4. Ora siamo sicuri che contributorData esiste. Controlliamo se l'utente è attivo.
+        if (!contributorData[2]) {
+            return <RegistrationForm />; 
+        }
+
+        // 5. Se l'utente è attivo, mostra la dashboard principale
         return (
             <> 
                 <DashboardHeader contributorInfo={contributorData} onNewInscriptionClick={openModal} /> 
