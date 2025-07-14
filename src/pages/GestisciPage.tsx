@@ -1,351 +1,607 @@
-import React, { useState, useEffect } from 'react';
-import { useParams, Link } from 'react-router-dom';
-import { ConnectButton, useActiveAccount, useReadContract, useSendTransaction } from 'thirdweb/react';
+import React, { useState, useEffect, useRef } from 'react';
+import { Link } from 'react-router-dom'; // Rimosso HashRouter da qui
+import { ConnectButton, useActiveAccount, useReadContract, useSendTransaction } from 'thirdweb/react'; // Rimosso ThirdwebProvider
 import { createThirdwebClient, getContract, prepareContractCall } from 'thirdweb';
 import { polygon } from 'thirdweb/chains';
-import { supplyChainABI as abi } from '../abi/contractABI';
-import '../App.css';
-import TransactionStatusModal from '../components/TransactionStatusModal';
+import { inAppWallet } from 'thirdweb/wallets';
 
-// --- MODIFICA: AGGIORNAMENTO CLIENT ID E INDIRIZZO CONTRATTO ---
-const client = createThirdwebClient({ clientId: "eda8282e23ee12f17d8d1d20ef8aaa83" });
-const contract = getContract({ 
-  client, 
-  chain: polygon,
-  address: "0x2Bd72307a73cC7BE3f275a81c8eDBE775bB08F3E"
-});
+// --- ABI del contratto (solo le parti usate nel componente) ---
+const supplyChainABI = [
+  {
+    "type": "function",
+    "name": "getContributorInfo",
+    "inputs": [ { "type": "address", "name": "", "internalType": "address" } ],
+    "outputs": [
+      { "type": "string", "name": "", "internalType": "string" },
+      { "type": "uint256", "name": "", "internalType": "uint256" },
+      { "type": "bool", "name": "", "internalType": "bool" }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "getBatchStepCount",
+    "inputs": [ { "type": "uint256", "name": "_batchId", "internalType": "uint256" } ],
+    "outputs": [ { "type": "uint256", "name": "", "internalType": "uint256" } ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "initializeBatch",
+    "inputs": [
+      { "type": "string", "name": "_name", "internalType": "string" },
+      { "type": "string", "name": "_description", "internalType": "string" },
+      { "type": "string", "name": "_date", "internalType": "string" },
+      { "type": "string", "name": "_location", "internalType": "string" },
+      { "type": "string", "name": "_imageIpfsHash", "internalType": "string" }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+];
 
-// --- MODIFICA: Componente aggiornato per leggere da un oggetto (es. eventoInfo.eventName) ---
-const EventoCard = ({ eventoInfo }: { eventoInfo: any }) => (
-    <div className="card" style={{backgroundColor: '#343a40', color: '#f8f9fa', marginTop: '1rem'}}>
-        <h4>{eventoInfo.eventName}</h4>
-        <p>{eventoInfo.description}</p>
-        <div style={{display: 'flex', justifyContent: 'space-between', fontSize: '0.9rem', color: '#adb5bd'}}>
-            <span>Luogo: {eventoInfo.location}</span>
-            <span>Data: {eventoInfo.date}</span>
-        </div>
-        {eventoInfo.attachmentsIpfsHash && eventoInfo.attachmentsIpfsHash !== "N/A" && (
-             <a href={`https://musical-emerald-partridge.myfilebase.com/ipfs/${eventoInfo.attachmentsIpfsHash}`} target="_blank" rel="noopener noreferrer" className="link-button" style={{marginTop: '1rem'}}>
-                 Vedi Documento Allegato
-             </a>
-        )}
-    </div>
+// --- Componente per lo status della transazione ---
+const TransactionStatusModal = ({ status, message, onClose }: { status: 'loading' | 'success' | 'error', message: string, onClose: () => void }) => (
+    <div className="modal-overlay">
+        <div className="modal-content" style={{ maxWidth: '400px', textAlign: 'center' }}>
+            <div className="modal-header">
+                <h2>{status === 'loading' ? 'In corso...' : status === 'success' ? 'Successo!' : 'Errore'}</h2>
+            </div>
+            <div className="modal-body">
+                <p>{message}</p>
+            </div>
+            <div className="modal-footer">
+                {status !== 'loading' && <button onClick={onClose} className="web3-button">Chiudi</button>}
+            </div>
+        </div>
+    </div>
 );
 
-const AggiungiEventoModal = ({ batchId, contributorName, onClose, onSuccess }: { batchId: bigint, contributorName: string, onClose: () => void, onSuccess: () => void }) => {
-    const [currentStep, setCurrentStep] = useState(1);
-    const [formData, setFormData] = useState({ eventName: "", description: "", date: new Date().toISOString().split('T')[0], location: "" });
-    const [selectedFile, setSelectedFile] = useState<File | null>(null);
-    const [loadingMessage, setLoadingMessage] = useState('');
-    const [txResult, setTxResult] = useState<{ status: 'success' | 'error'; message: string } | null>(null);
-    const { mutate: sendTransaction, isPending } = useSendTransaction();
 
-    const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
-        const { name, value } = e.target;
-        setFormData(prev => ({...prev, [name]: value}));
-    };
-    const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => setSelectedFile(e.target.files?.[0] || null);
+// --- Stili CSS ---
+const AziendaPageStyles = () => (
+  <style>{`
+    :root {
+        --primary-color: #3498db;
+        --secondary-color: #2c3e50;
+        --background-color: #1c1c1c;
+        --card-bg-color: #2a2a2a;
+        --text-color: #ecf0f1;
+        --border-color: #444;
+    }
+    body {
+        background-color: var(--background-color);
+        color: var(--text-color);
+        font-family: 'Inter', sans-serif;
+    }
+    .app-container-full { 
+        padding: 0 2rem; 
+        max-width: 1200px;
+        margin: 0 auto;
+    }
+    .main-header-bar { 
+        display: flex; 
+        justify-content: space-between; 
+        align-items: center; 
+        padding: 1rem 0;
+        border-bottom: 1px solid var(--border-color);
+        margin-bottom: 2rem;
+    }
+    .header-title { 
+        font-size: 1.75rem; 
+        font-weight: bold; 
+    }
+    .dashboard-header-card { 
+        display: flex; 
+        justify-content: space-between; 
+        align-items: center; 
+        position: relative; 
+        padding: 1.5rem; 
+        background-color: #212529; 
+        border: 1px solid #495057; 
+        border-radius: 12px; 
+        margin-bottom: 2rem; 
+    }
+    .dashboard-header-info { 
+        display: flex; 
+        flex-direction: column; 
+    }
+    .company-name-header { 
+        margin-top: 0; 
+        margin-bottom: 1rem; 
+        font-size: 3rem; 
+    }
+    .company-status-container { 
+        display: flex; 
+        align-items: center; 
+        gap: 1.5rem; 
+    }
+    .status-item { 
+        display: flex; 
+        align-items: center; 
+        gap: 0.5rem; 
+    }
+    .web3-button {
+        background-color: var(--primary-color);
+        color: white;
+        border: none;
+        padding: 10px 20px;
+        border-radius: 8px;
+        cursor: pointer;
+        font-weight: bold;
+        transition: background-color 0.3s ease;
+        text-decoration: none;
+        display: inline-block;
+        text-align: center;
+    }
+    .web3-button:hover {
+        background-color: #2980b9;
+    }
+    .web3-button.large { 
+        padding: 1rem 2rem; 
+        font-size: 1.1rem; 
+    }
+    .web3-button.secondary {
+        background-color: #6c757d;
+    }
+    .web3-button:disabled {
+        background-color: #555;
+        cursor: not-allowed;
+    }
+    .company-table {
+        width: 100%;
+        border-collapse: collapse;
+    }
+    .company-table th, .company-table td {
+        padding: 12px 15px;
+        text-align: left;
+        border-bottom: 1px solid var(--border-color);
+    }
+    .company-table th {
+        background-color: var(--secondary-color);
+    }
+    .company-table .desktop-row { display: table-row; }
+    .company-table .mobile-card { display: none; }
+    .pagination-controls { 
+        display: flex; 
+        justify-content: space-between; 
+        align-items: center; 
+        margin-top: 1rem; 
+    }
+    .recap-summary { 
+        text-align: left; 
+        padding: 15px; 
+        background-color: var(--card-bg-color); 
+        border: 1px solid var(--border-color); 
+        border-radius: 8px; 
+        margin-bottom: 20px;
+    }
+    .recap-summary p { margin: 8px 0; word-break: break-word; }
+    .recap-summary p strong { color: #f8f9fa; }
+    .modal-overlay {
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        background-color: rgba(0, 0, 0, 0.7);
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        z-index: 1000;
+    }
+    .modal-content {
+        background-color: var(--card-bg-color);
+        padding: 2rem;
+        border-radius: 12px;
+        width: 90%;
+        max-width: 600px;
+        border: 1px solid var(--border-color);
+    }
+    .modal-header {
+        border-bottom: 1px solid var(--border-color);
+        padding-bottom: 1rem;
+        margin-bottom: 1rem;
+    }
+    .modal-footer {
+        border-top: 1px solid var(--border-color);
+        padding-top: 1rem;
+        margin-top: 1rem;
+        display: flex;
+        justify-content: flex-end;
+        gap: 1rem;
+    }
+    .filter-input {
+        width: 100%;
+        padding: 8px;
+        border-radius: 6px;
+        border: 1px solid #555;
+        background-color: #333;
+        color: white;
+    }
+    .clickable-name {
+        cursor: pointer;
+        color: var(--primary-color);
+        font-weight: bold;
+    }
+    .status-closed { color: #2ecc71; }
+    .status-open { color: #f39c12; }
+    .login-container {
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        min-height: 80vh;
+    }
+    @media (max-width: 768px) {
+        .app-container-full { padding: 0 1rem; }
+        .main-header-bar { flex-direction: column; align-items: flex-start; gap: 1rem; }
+        .header-title { font-size: 1.5rem; }
+        .wallet-button-container { align-self: flex-start; }
+        .dashboard-header-card { flex-direction: column; align-items: flex-start; gap: 1.5rem; }
+        .company-name-header { font-size: 2.2rem; }
+        .company-status-container { flex-direction: column; align-items: flex-start; gap: 0.75rem; }
+        .header-actions { width: 100%; }
+        .header-actions .web3-button.large { width: 100%; font-size: 1rem; }
+        .company-table thead { display: none; }
+        .company-table .desktop-row { display: none; }
+        .company-table tbody, .company-table tr, .company-table td { display: block; width: 100%; }
+        .company-table tr { margin-bottom: 1rem; }
+        .company-table td[colspan="7"] { padding: 20px; text-align: center; border: 1px solid #495057; border-radius: 8px; }
+        .mobile-card { display: block; border: 1px solid #495057; border-radius: 8px; padding: 1rem; margin-bottom: 1rem; background-color: var(--secondary-color); }
+        .mobile-card .card-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.75rem; border-bottom: 1px solid #495057; padding-bottom: 0.75rem; }
+        .mobile-card .card-header strong { font-size: 1.1rem; }
+        .mobile-card .card-body p { margin: 0.5rem 0; }
+        .mobile-card .card-body p strong { color: #bdc3c7; }
+        .mobile-card .card-footer { margin-top: 1rem; padding-top: 1rem; border-top: 1px solid #495057; }
+        .mobile-card .web3-button { width: 100%; text-align: center; }
+        .pagination-controls { flex-direction: column; gap: 1rem; }
+    }
+  `}</style>
+);
 
-    const handleAddEvento = async () => {
-        let attachmentsIpfsHash = "N/A";
-        if (selectedFile) {
-            const MAX_SIZE_MB = 5;
-            const MAX_SIZE_BYTES = MAX_SIZE_MB * 1024 * 1024;
-            const ALLOWED_FORMATS = ['image/png', 'image/jpeg', 'image/webp', 'application/pdf', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'text/plain', 'text/csv'];
-            
-            if (selectedFile.size > MAX_SIZE_BYTES) {
-                setTxResult({ status: 'error', message: `Il file è troppo grande. Limite massimo: ${MAX_SIZE_MB} MB.` }); return;
-            }
-            if (!ALLOWED_FORMATS.includes(selectedFile.type)) {
-                setTxResult({ status: 'error', message: 'Formato file non supportato.' }); return;
-            }
-            setLoadingMessage('Caricamento allegato, attendi...');
-            try {
-                const body = new FormData();
-                body.append('file', selectedFile);
-                body.append('companyName', contributorName);
-                const response = await fetch('/api/upload', { method: 'POST', body });
-                if (!response.ok) {
-                    const errorText = await response.text();
-                    throw new Error(`Errore del server: ${errorText}`);
-                }
-                const { cid } = await response.json();
-                if (!cid) throw new Error("CID non ricevuto dalla nostra API.");
-                attachmentsIpfsHash = cid;
-            } catch (error: any) {
-                setTxResult({ status: 'error', message: `Errore caricamento: ${error.message}` });
-                setLoadingMessage(''); return;
-            }
-        }
+// --- MODIFICATO: Utilizzo delle variabili d'ambiente per Client ID e indirizzo Contratto ---
+const client = createThirdwebClient({ 
+    clientId: process.env.NEXT_PUBLIC_CLIENT_ID || "023dd6504a82409b2bc7cb971fd35b16" 
+});
 
-        setLoadingMessage('Transazione in corso, attendi...');
-        const transaction = prepareContractCall({ 
-            contract, abi, 
-            method: "function addStepToBatch(uint256 _batchId, string _eventName, string _description, string _date, string _location, string _attachmentsIpfsHash)", 
-            params: [batchId, formData.eventName, formData.description, formData.date, formData.location, attachmentsIpfsHash] 
-        });
+const contract = getContract({ 
+  client, 
+  chain: polygon,
+  address: process.env.NEXT_PUBLIC_CONTRACT_ADDRESS || "0xd0baD36896Df719B26683e973f2fc6135F215D4E"
+});
+// -----------------------------------------------------------------------------------------
 
-        sendTransaction(transaction, { 
-            onSuccess: () => { setLoadingMessage(''); onSuccess(); },
-            onError: (err) => { setLoadingMessage(''); setTxResult({ status: 'error', message: err.message }); } 
-        });
-    };
-    
-    const handleConfirmAndSubmit = () => {
-        if (window.confirm("Vuoi confermare tutti i dati inseriti e procedere scrivere l'evento?")) {
-            handleAddEvento();
-        }
-    };
+const RegistrationForm = () => ( <div className="card" style={{textAlign: 'center', padding: '2rem', backgroundColor: 'var(--card-bg-color)', borderRadius: '12px'}}><h3>Benvenuto su Easy Chain!</h3><p>Il tuo account non è ancora attivo. Compila il form di registrazione per inviare una richiesta di attivazione.</p></div> );
 
-    const handleNextStep = () => {
-        if (currentStep === 1 && !formData.eventName.trim()) {
-            alert("Il campo 'Nome Evento' è obbligatorio per procedere."); return;
-        }
-        setCurrentStep(prev => prev + 1);
-    };
+interface BatchData { id: string; batchId: bigint; name: string; description: string; date: string; location: string; imageIpfsHash: string; contributorName: string; isClosed: boolean; }
 
-    const helpTextStyle = { backgroundColor: '#343a40', border: '1px solid #495057', borderRadius: '8px', padding: '16px', marginTop: '16px', fontSize: '0.9rem', color: '#f8f9fa' };
-    const isProcessing = loadingMessage !== '' || isPending;
-
-    return (
-        <>
-            <div className="modal-overlay" onClick={onClose}>
-                <div className="modal-content" onClick={(e) => e.stopPropagation()}>
-                    <div className="modal-header"><h2>Aggiungi Nuovo Evento ({currentStep}/5)</h2></div>
-                    <div className="modal-body" style={{ minHeight: '350px' }}>
-                        {currentStep === 1 && <div> <div className="form-group"> <label>Nome Evento <span style={{color: 'red', fontWeight:'bold'}}>* Obbligatorio</span></label> <input type="text" name="eventName" value={formData.eventName} onChange={handleInputChange} className="form-input" maxLength={100} /> <small className="char-counter">{formData.eventName.length} / 100</small> </div> <div style={helpTextStyle}><p>Inserisci un nome identificativo per questo evento, può essere un'operazione specifica (come "Raccolta", "Trasformazione", "Spedizione"), un controllo di qualità, un passaggio logistico, un aggiornamento contrattuale o qualsiasi attività rilevante per la tracciabilità del prodotto. Scegli un nome descrittivo che aiuti a comprendere subito di cosa si tratta.</p></div> </div>}
-                        {currentStep === 2 && <div> <div className="form-group"> <label>Descrizione <span style={{color: '#6c757d'}}>Non obbligatorio</span></label> <textarea name="description" value={formData.description} onChange={handleInputChange} className="form-input" rows={4} maxLength={500}></textarea> <small className="char-counter">{formData.description.length} / 500</small> </div> <div style={helpTextStyle}><p>Fornisci una breve descrizione di cosa è avvenuto in questo evento: specifica le attività svolte, i dettagli rilevanti, eventuali soggetti coinvolti o note tecniche utili per la tracciabilità.</p></div> </div>}
-                        {currentStep === 3 && <div> <div className="form-group"> <label>Luogo <span style={{color: '#6c757d'}}>Non obbligatorio</span></label> <input type="text" name="location" value={formData.location} onChange={handleInputChange} className="form-input" maxLength={100} /> <small className="char-counter">{formData.location.length} / 100</small> </div> <div style={helpTextStyle}><p>Inserisci il luogo dove si è svolto questo evento (es. un magazzino, un laboratorio, un punto vendita, ecc.).</p></div> </div>}
-                        {currentStep === 4 && <div> <div className="form-group"> <label>Data <span style={{color: '#6c757d'}}>Non obbligatorio</span></label> <input type="date" name="date" value={formData.date} onChange={handleInputChange} className="form-input" max={new Date().toISOString().split('T')[0]} /> </div> <div style={helpTextStyle}><p>Inserisci la data in cui si è verificato l'evento.</p></div> </div>}
-                        {currentStep === 5 && <div> <div className="form-group"> <label>Carica Allegato <span style={{color: '#6c757d'}}>Non obbligatorio</span></label> <input type="file" name="attachment" onChange={handleFileChange} className="form-input" accept=".jpg, .jpeg, .png, .webp, .pdf, .docx, .xlsx, .txt, .csv"/> {selectedFile && <p className="file-name-preview">File selezionato: {selectedFile.name}</p>} <small style={{marginTop: '4px'}}>Formati supportati. Max: 5 MB.</small> </div> <div style={helpTextStyle}><p>Allega un documento o un'immagine relativa a questo evento (es. bolla di trasporto, certificato di analisi, foto del prodotto, ecc.).</p></div> </div>}
-                    </div>
-                    <div className="modal-footer" style={{ justifyContent: 'space-between' }}>
-                        <div>{currentStep > 1 && <button onClick={() => setCurrentStep(p => p - 1)} className="web3-button secondary">Indietro</button>}</div>
-                        <div>
-                            <button onClick={onClose} className="web3-button secondary">Chiudi</button>
-                            {currentStep < 5 && <button onClick={handleNextStep} className="web3-button">Avanti</button>}
-                            {currentStep === 5 && <button onClick={handleConfirmAndSubmit} disabled={isProcessing} className="web3-button">{isProcessing ? "..." : "Conferma"}</button>}
-                        </div>
-                    </div>
-                </div>
-            </div>
-            {isProcessing && <TransactionStatusModal status={'loading'} message={loadingMessage} onClose={() => {}} />}
-            {txResult && <TransactionStatusModal status={txResult.status} message={txResult.message} onClose={() => setTxResult(null)} />}
-        </>
-    );
+const BatchRow = ({ batch, localId }: { batch: BatchData; localId: number }) => {
+    const [showDescription, setShowDescription] = useState(false);
+    const { data: stepCount } = useReadContract({ contract, abi: supplyChainABI, method: "getBatchStepCount", params: [batch.batchId] });
+    const formatDate = (dateStr: string | undefined) => !dateStr || dateStr.split('-').length !== 3 ? '/' : dateStr.split('-').reverse().join('/');
+    return (
+        <>
+            <tr className="desktop-row">
+                <td>{localId}</td>
+                <td><span className="clickable-name" onClick={() => setShowDescription(true)}>{batch.name || '/'}</span></td>
+                <td>{formatDate(batch.date)}</td>
+                <td>{batch.location || '/'}</td>
+                <td>{stepCount !== undefined ? stepCount.toString() : '/'}</td>
+                <td>{batch.isClosed ? <span className="status-closed">✅ Chiuso</span> : <span className="status-open">⏳ Aperto</span>}</td>
+                <td><Link to={`/gestisci/${batch.batchId}`} className="web3-button">Gestisci</Link></td>
+            </tr>
+            <tr className="mobile-card">
+                <td>
+                    <div className="card-header"><strong className="clickable-name" onClick={() => setShowDescription(true)}>{batch.name || 'N/A'}</strong><span className={batch.isClosed ? 'status-closed' : 'status-open'}>{batch.isClosed ? '✅ Chiuso' : '⏳ Aperto'}</span></div>
+                    <div className="card-body"><p><strong>ID:</strong> {localId}</p><p><strong>Data:</strong> {formatDate(batch.date)}</p><p><strong>Luogo:</strong> {batch.location || '/'}</p><p><strong>N° Passaggi:</strong> {stepCount !== undefined ? stepCount.toString() : '/'}</p></div>
+                    <div className="card-footer"><Link to={`/gestisci/${batch.batchId}`} className="web3-button">Gestisci</Link></div>
+                </td>
+            </tr>
+            {showDescription && (
+                <div className="modal-overlay" onClick={() => setShowDescription(false)}>
+                    <div className="modal-content description-modal" onClick={(e) => e.stopPropagation()}><div className="modal-header"><h2>Descrizione Iscrizione / Lotto</h2></div><div className="modal-body"><p>{batch.description || 'Nessuna descrizione fornita.'}</p></div><div className="modal-footer"><button onClick={() => setShowDescription(false)} className="web3-button">Chiudi</button></div></div>
+                </div>
+            )}
+        </>
+    );
 };
 
-const GestisciPageHeader = ({ contributorInfo }: { contributorInfo: any }) => {
-    const companyName = contributorInfo?.[0] || 'Azienda';
-    const credits = contributorInfo?.[1]?.toString() || '...';
-    return (
-        <div className="dashboard-header-card" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <div>
-                <h2 style={{ marginTop: 0, marginBottom: '1rem', fontSize: '3rem' }}>{companyName}</h2>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '1.5rem' }}>
-                    <div className="status-item"><span>Crediti Rimanenti: <strong>{credits}</strong></span></div>
-                    <div className="status-item" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}><span>Stato: <strong>ATTIVO</strong></span><span className="status-icon">✅</span></div>
-                </div>
-            </div>
-            <div>
-                <Link to="/">
-                    <button style={{backgroundColor: '#6A5ACD', color: 'white', border: 'none', padding: '12px 24px', borderRadius: '8px', cursor: 'pointer', fontSize: '1rem', fontWeight: 'bold'}}>
-                        ← Torna alla Pagina Principale
-                    </button>
-                </Link>
-            </div>
-        </div>
-    );
+const BatchTable = ({ batches, nameFilter, setNameFilter, locationFilter, setLocationFilter, statusFilter, setStatusFilter }: any) => {
+    const [currentPage, setCurrentPage] = useState(1);
+    const [itemsToShow, setItemsToShow] = useState(10);
+    const MAX_PER_PAGE = 30;
+    const totalPages = Math.max(1, Math.ceil(batches.length / MAX_PER_PAGE));
+    const startIndex = (currentPage - 1) * MAX_PER_PAGE;
+    const itemsOnCurrentPage = batches.slice(startIndex, startIndex + MAX_PER_PAGE);
+    const visibleBatches = itemsOnCurrentPage.slice(0, itemsToShow);
+
+    useEffect(() => {
+        setCurrentPage(1);
+        setItemsToShow(10);
+    }, [batches, nameFilter, locationFilter, statusFilter]);
+
+    const handleLoadMore = () => setItemsToShow(prev => Math.min(prev + 10, MAX_PER_PAGE));
+    const handlePageChange = (page: number) => {
+        if (page < 1 || page > totalPages) return;
+        setCurrentPage(page);
+        setItemsToShow(10);
+    };
+
+    return (
+        <div className="table-container">
+            <table className="company-table">
+                <thead>
+                    <tr className="desktop-row"><th>ID</th><th>Nome</th><th>Data</th><th>Luogo</th><th>N° Passaggi</th><th>Stato</th><th>Azione</th></tr>
+                    <tr className="filter-row"><th></th><th><input type="text" placeholder="Filtra per nome..." className="filter-input" value={nameFilter} onChange={(e) => setNameFilter(e.target.value)} /></th><th></th><th><input type="text" placeholder="Filtra per luogo..." className="filter-input" value={locationFilter} onChange={(e) => setLocationFilter(e.target.value)} /></th><th></th><th><select className="filter-input" value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}><option value="all">Tutti</option><option value="open">Aperto</option><option value="closed">Chiuso</option></select></th><th></th></tr>
+                </thead>
+                <tbody>{visibleBatches.length > 0 ? (visibleBatches.map((batch: BatchData, index: number) => <BatchRow key={batch.id} batch={batch} localId={startIndex + index + 1} />)) : (<tr><td colSpan={7} style={{textAlign: 'center', padding: '2rem'}}>Nessuna iscrizione trovata.</td></tr>)}</tbody>
+            </table>
+            <div className="pagination-controls">
+                {itemsToShow < itemsOnCurrentPage.length && (<button onClick={handleLoadMore} className='web3-button secondary'>Vedi altri 10...</button>)}
+                <div className="page-selector">
+                    {totalPages > 1 && <> <button onClick={() => handlePageChange(currentPage - 1)} disabled={currentPage === 1} className="web3-button secondary">&lt;</button> <span> Pagina {currentPage} di {totalPages} </span> <button onClick={() => handlePageChange(currentPage + 1)} disabled={currentPage === totalPages} className="web3-button secondary">&gt;</button></>}
+                </div>
+            </div>
+        </div>
+    );
 };
 
-const ImagePlaceholder = () => ( <div style={{width:'150px',height:'150px',flexShrink:0,backgroundColor:'#f0f0f0',border:'1px solid #ddd',borderRadius:'8px',display:'flex',flexDirection:'column',justifyContent:'center',alignItems:'center',color:'#a0a0a0',textAlign:'center'}}><svg xmlns="http://www.w3.org/2000/svg" width="40" height="40" fill="currentColor" viewBox="0 0 16 16"><path d="M6.002 5.5a1.5 1.5 0 1 1-3 0 1.5 1.5 0 0 1 3 0z"/><path d="M2.002 1a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V3a2 2 0 0 0-2-2h-12zm12 1a1 1 0 0 1 1 1v6.5l-3.777-1.947a.5.5 0 0 0-.577.093l-3.71 3.71-2.66-1.772a.5.5 0 0 0-.63.062L1.002 12V3a1 1 0 0 1 1-1h12z"/></svg><div style={{fontSize:'0.8rem',marginTop:'5px',fontWeight:'bold'}}>NO IMAGE<br/>AVAILABLE</div></div> );
-
-// --- MODIFICA: Componente aggiornato per leggere da un oggetto (es. batchInfo.name) ---
-const BatchSummaryCard = ({ batchInfo, eventCount, onAddEventoClick, onFinalize }: { batchInfo: any, eventCount: number, onAddEventoClick: () => void, onFinalize: () => void }) => {
-    if(!batchInfo) return null;
-    
-    const defaultImageUrl="https://musical-emerald-partridge.myfilebase.com/ipfs/QmNUGt9nxmkV27qF56jFAG9FUPABvGww5TTW9R9vh2TdvB";
-    const imageUrl=batchInfo.imageIpfsHash && batchInfo.imageIpfsHash !=="N/A"?`https://musical-emerald-partridge.myfilebase.com/ipfs/${batchInfo.imageIpfsHash}`:defaultImageUrl;
-    const isPlaceholder=imageUrl===defaultImageUrl;
-    const isClosed=batchInfo.isClosed;
-
-    const statusIndicatorStyle = { height: '12px', width: '12px', backgroundColor: isClosed ? '#28a745' : '#ffc107', borderRadius: '50%', display: 'inline-block', marginRight: '8px' };
-
-    return(
-        <div className="card" style={{marginTop:'1rem',backgroundColor:'transparent',border:'1px solid #8bc4a8',padding:'1.5rem',display:'flex',alignItems:'center',gap:'2rem'}}>
-            {isPlaceholder?<ImagePlaceholder />:<img src={imageUrl} alt="Immagine batch" style={{width:'150px',height:'150px',objectFit:'cover',borderRadius:'8px',flexShrink:0}} />}
-            <div style={{flex:'1 1 40%',minWidth:0}}>
-                <h3 style={{fontWeight:'bold',fontSize:'1.75rem',margin:'0 0 0.5rem 0',color:'white'}}>{batchInfo.name}</h3>
-                <p style={{margin:0,color:'#ced4da',fontSize:'0.95rem'}}>{batchInfo.description||'Nessuna descrizione fornita.'}</p>
-            </div>
-            <div style={{flex:'1 1 25%',color:'#ced4da',textAlign:'left'}}>
-                <p style={{margin:'0.3rem 0', display: 'flex', alignItems: 'center'}}>
-                    <span style={statusIndicatorStyle}></span>
-                    <strong>Stato Iscrizione:</strong> <span style={{fontWeight:'bold', marginLeft: '4px'}}>{isClosed?'Chiuso':'Aperto'}</span>
-                </p>
-                <p style={{margin:'0.3rem 0'}}><strong>Luogo:</strong> {batchInfo.location||'N/D'}</p>
-                <p style={{margin:'0.3rem 0'}}><strong>Data:</strong> {batchInfo.date||'N/D'}</p>
-                <p style={{margin:'0.3rem 0'}}><strong>N° Eventi:</strong> {eventCount}</p>
-            </div>
-            {!isClosed&&(
-                <div style={{display:'flex',flexDirection:'column',gap:'1rem'}}>
-                    <button onClick={onAddEventoClick} style={{backgroundColor:'#6A5ACD',color:'white',border:'none',padding:'12px 24px',borderRadius:'8px',cursor:'pointer',fontSize:'1rem',fontWeight:'bold',width:'200px'}}>Aggiungi Evento</button>
-                    <button onClick={onFinalize} style={{backgroundColor:'#495057',color:'#ced4da',border:'none',padding:'12px 24px',borderRadius:'8px',cursor:'pointer',fontSize:'1rem',fontWeight:'bold',width:'200px'}}>Finalizza Iscrizione</button>
-                </div>
-            )}
-        </div>
-    );
+const DashboardHeader = ({ contributorInfo, onNewInscriptionClick }: { contributorInfo: readonly [string, bigint, boolean], onNewInscriptionClick: () => void }) => {
+    const companyName = contributorInfo[0] || 'Azienda';
+    const credits = contributorInfo[1].toString();
+    return (
+        <div className="dashboard-header-card">
+            <div className="dashboard-header-info">
+                <h2 className="company-name-header">{companyName}</h2>
+                <div className="company-status-container">
+                    <div className="status-item"><span>Crediti Rimanenti: <strong>{credits}</strong></span></div>
+                    <div className="status-item"><span>Stato: <strong>ATTIVO</strong></span><span className="status-icon">✅</span></div>
+                </div>
+            </div>
+            <div className="header-actions"><button className="web3-button large" onClick={onNewInscriptionClick}>Nuova Iscrizione</button></div>
+        </div>
+    );
 };
 
-export default function GestisciPage() {
-    const { batchId } = useParams<{ batchId: string }>();
-    const account = useActiveAccount();
-    const { data: contributorInfo } = useReadContract({ contract, method: "function getContributorInfo(address) view returns (string, uint256, bool)", params: account ? [account.address] : undefined });
+const getInitialFormData = () => ({ name: "", description: "", date: "", location: "" });
 
-    const [batchInfo, setBatchInfo] = useState<any>(null);
-    const [eventi, setEventi] = useState<any[]>([]);
-    const [isLoading, setIsLoading] = useState(true);
-    const { mutate: sendTransaction, isPending: isFinalizing } = useSendTransaction();
-    const [txResult, setTxResult] = useState<{ status: 'success' | 'error'; message: string } | null>(null);
-    const [isModalOpen, setIsModalOpen] = useState(false);
+const AziendaPage = () => {
+    const account = useActiveAccount();
+    const prevAccountRef = useRef(account?.address);
+    
+    const { data: contributorData, isLoading: isStatusLoading, refetch: refetchContributorInfo, isError } = useReadContract({ 
+        contract, 
+        abi: supplyChainABI,
+        method: "getContributorInfo", 
+        params: account ? [account.address] : undefined, 
+        queryOptions: { enabled: !!account, refetchInterval: false } 
+    });
 
-    // --- MODIFICA: SOSTITUZIONE LOGICA DI FETCH CON INSIGHT (API REST) ---
-    const fetchBatchData = async () => {
-        if (!batchId) return;
-        setIsLoading(true);
+    const { mutate: sendTransaction, isPending } = useSendTransaction();
+    const [modal, setModal] = useState<'init' | null>(null);
+    const [formData, setFormData] = useState(getInitialFormData());
+    const [selectedFile, setSelectedFile] = useState<File | null>(null);
+    const [txResult, setTxResult] = useState<{ status: 'success' | 'error'; message: string } | null>(null);
+    const [allBatches, setAllBatches] = useState<BatchData[]>([]);
+    const [filteredBatches, setFilteredBatches] = useState<BatchData[]>([]);
+    const [isLoadingBatches, setIsLoadingBatches] = useState(true);
+    const [nameFilter, setNameFilter] = useState('');
+    const [locationFilter, setLocationFilter] = useState('');
+    const [statusFilter, setStatusFilter] = useState('all');
+    const [loadingMessage, setLoadingMessage] = useState('');
 
-        const insightBaseUrl = 'https://polygon.insight.thirdweb.com';
-        const contractAddress = '0x2Bd72307a73cC7BE3f275a81c8eDBE775bB08F3E';
-        const clientId = 'eda8282e23ee12f17d8d1d20ef8aaa83';
+    const fetchAllBatches = async () => {
+        if (!account?.address) return;
+        setIsLoadingBatches(true);
 
-        const initEventSignature = encodeURIComponent('BatchInitialized(address,uint256,string,string,string,string,string,string,bool)');
-        const stepEventSignature = encodeURIComponent('BatchStepAdded(uint256,uint256,string,string,string,string,string)');
-        const closeEventSignature = encodeURIComponent('BatchClosed(address,uint256)');
-        
-        const headers = { 'x-client-id': clientId };
+        try {
+            const response = await fetch(`/api/getBatches?address=${account.address}`);
 
-        // --- FIX: URL CORRETTO ---
-        const initUrl = new URL(`${insightBaseUrl}/v1/events/${contractAddress}/${initEventSignature}`);
-        initUrl.searchParams.append('batchId', batchId);
+            if (!response.ok) {
+              const errorData = await response.json();
+              throw new Error(errorData.message || `Errore dal server: ${response.statusText}`);
+            }
+            
+            const events = await response.json();
 
-        const stepsUrl = new URL(`${insightBaseUrl}/v1/events/${contractAddress}/${stepEventSignature}`);
-        stepsUrl.searchParams.append('batchId', batchId);
-        stepsUrl.searchParams.append('order', 'desc');
+            if (!Array.isArray(events)) {
+                console.error("La risposta dell'API non è un array:", events);
+                setAllBatches([]);
+                return;
+            }
+            
+            const formattedBatches = events
+                .map((event: any): BatchData | null => {
+                    if (!event || !event.data || event.data.batchId === undefined || event.data.batchId === null) {
+                        console.warn("Evento scartato per dati mancanti o malformati:", event);
+                        return null;
+                    }
+                    const args = event.data;
+                    try {
+                        return {
+                            id: event.transaction_hash || `${Date.now()}-${Math.random()}`,
+                            batchId: BigInt(args.batchId),
+                            name: args.name || "Senza nome",
+                            description: args.description || "Nessuna descrizione.",
+                            date: args.date || "",
+                            location: args.location || "N/A",
+                            imageIpfsHash: args.imageIpfsHash || "",
+                            contributorName: args.contributorName || "Sconosciuto",
+                            isClosed: !!args.isClosed,
+                        };
+                    } catch (e) {
+                        console.error("Impossibile processare l'evento, batchId non valido:", args.batchId, event);
+                        return null;
+                    }
+                })
+                .filter((b): b is BatchData => b !== null);
+            
+            setAllBatches(formattedBatches);
+        } catch (error) {
+            console.error("Errore nel caricare le iscrizioni:", error);
+            setAllBatches([]);
+        } finally {
+            setIsLoadingBatches(false);
+        }
+    };
 
-        const closeUrl = new URL(`${insightBaseUrl}/v1/events/${contractAddress}/${closeEventSignature}`);
-        closeUrl.searchParams.append('batchId', batchId);
+    useEffect(() => {
+        if (account?.address && prevAccountRef.current !== account.address) { 
+            refetchContributorInfo(); 
+            fetchAllBatches(); 
+        } else if (account?.address && !prevAccountRef.current) { 
+            fetchAllBatches(); 
+        }
+        prevAccountRef.current = account?.address;
+    }, [account, refetchContributorInfo]);
 
-        try {
-            const [initResponse, stepsResponse, closeResponse] = await Promise.all([
-                fetch(initUrl.toString(), { headers }),
-                fetch(stepsUrl.toString(), { headers }),
-                fetch(closeUrl.toString(), { headers })
-            ]);
+    useEffect(() => {
+        let tempBatches = [...allBatches];
+        if (nameFilter) tempBatches = tempBatches.filter(b => b.name.toLowerCase().includes(nameFilter.toLowerCase()));
+        if (locationFilter) tempBatches = tempBatches.filter(b => b.location.toLowerCase().includes(locationFilter.toLowerCase()));
+        if (statusFilter !== 'all') { 
+            const isOpen = statusFilter === 'open'; 
+            tempBatches = tempBatches.filter(b => !b.isClosed === isOpen); 
+        }
+        setFilteredBatches(tempBatches);
+    }, [nameFilter, locationFilter, statusFilter, allBatches]);
+    
+    const handleModalInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => { setFormData(prev => ({...prev, [e.target.name]: e.target.value})); };
+    const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => { setSelectedFile(e.target.files?.[0] || null); };
+    
+    const handleInitializeBatch = async () => {
+        if (!formData.name.trim()) { setTxResult({ status: 'error', message: 'Il campo Nome è obbligatorio.' }); return; }
+        setLoadingMessage('Preparazione transazione...');
+        let imageIpfsHash = "N/A";
+        if (selectedFile) {
+            // Qui andrebbe la logica di upload del file su IPFS (es. tramite il servizio Storage di Thirdweb)
+            // const cid = await thirdwebStorage.upload(selectedFile);
+            // imageIpfsHash = cid;
+        }
+        setLoadingMessage('Transazione in corso...');
+        const transaction = prepareContractCall({ 
+            contract, 
+            abi: supplyChainABI, 
+            method: "initializeBatch", 
+            params: [formData.name, formData.description, formData.date, formData.location, imageIpfsHash] 
+        });
+        sendTransaction(transaction, { 
+            onSuccess: () => { 
+                setTxResult({ status: 'success', message: 'Iscrizione creata con successo!' }); 
+                setLoadingMessage(''); 
+                setTimeout(() => {
+                    fetchAllBatches();
+                    refetchContributorInfo();
+                }, 4000);
+            },
+            onError: (err) => { 
+                console.error("Dettagli errore transazione:", err);
+                const errorMessage = err.message.toLowerCase();
+                let displayMessage = "Errore generico nella transazione.";
+                if (errorMessage.includes("insufficient funds") || errorMessage.includes("contributor has no credits")) {
+                    displayMessage = "Crediti insufficienti. Contatta l'amministratore.";
+                } else if (errorMessage.includes("not an active contributor")) {
+                    displayMessage = "Il tuo account non risulta essere un contributor attivo.";
+                } else {
+                    const reasonMatch = err.message.match(/reason="([^"]+)"/);
+                    if (reasonMatch && reasonMatch[1]) displayMessage = `Errore: ${reasonMatch[1]}`;
+                }
+                setTxResult({ status: 'error', message: displayMessage });
+                setLoadingMessage(''); 
+            } 
+        });
+    };
+    
+    const openModal = () => { setFormData(getInitialFormData()); setSelectedFile(null); setTxResult(null); setModal('init'); }
+    const handleCloseModal = () => setModal(null);
+    
+    if (!account) { 
+        return (
+            <div className='login-container'>
+                <AziendaPageStyles />
+                <ConnectButton 
+                    client={client} 
+                    chain={polygon} 
+                    accountAbstraction={{ chain: polygon, sponsorGas: true }} 
+                    wallets={[inAppWallet()]} 
+                    connectButton={{ label: "Connettiti / Log In", style: { fontSize: '1.2rem', padding: '1rem 2rem' } }} 
+                />
+            </div>
+        ); 
+    }
+    
+    // --- FUNZIONE DI RENDER CORRETTA E RESILIENTE ---
+    const renderDashboardContent = () => { 
+        // 1. Gestisci prima lo stato di caricamento
+        if (isStatusLoading) {
+            return <p style={{textAlign: 'center', marginTop: '4rem'}}>Verifica stato account...</p>; 
+        }
 
-            if (!initResponse.ok) {
-                 // Gestisce il caso 404 senza bloccare tutto
-                if(initResponse.status === 404) {
-                    console.warn("Nessun evento BatchInitialized trovato per questo ID.");
-                    setBatchInfo(null); // Pulisce i dati vecchi
-                } else {
-                    throw new Error(`Chiamata per BatchInitialized fallita: ${initResponse.statusText}`);
-                }
-            } else {
-                const initEvents = await initResponse.json();
-                const mainInfo = initEvents[0]?.arguments;
-                if (mainInfo) {
-                    const closeEvents = await closeResponse.json();
-                    setBatchInfo({
-                        ...mainInfo,
-                        isClosed: closeEvents.length > 0
-                    });
-                }
-            }
+        // 2. Gestisci lo stato di errore
+        if (isError) {
+            return <p style={{textAlign: 'center', marginTop: '4rem', color: 'red'}}>Errore nel recuperare i dati dell'account. Riprova.</p>
+        }
 
-            if(stepsResponse.ok) {
-                const stepEvents = await stepsResponse.json();
-                const formattedSteps = stepEvents.map((event: any) => event.arguments);
-                setEventi(formattedSteps);
-            } else {
-                 if(stepsResponse.status === 404) {
-                    console.log("Nessun evento BatchStepAdded trovato.");
-                    setEventi([]);
-                 } else {
-                    throw new Error(`Chiamata per BatchStepAdded fallita: ${stepsResponse.statusText}`);
-                 }
-            }
+        // 3. Gestisci il caso in cui i dati non sono ancora disponibili (ma non c'è errore né caricamento)
+        // Questo è il controllo cruciale per prevenire il crash.
+        if (!contributorData) {
+            return <p style={{textAlign: 'center', marginTop: '4rem'}}>Caricamento dati account...</p>;
+        }
 
-        } catch (error) {
-            console.error("Errore nel caricare i dati del batch da Insight:", error);
-        } finally {
-            setIsLoading(false);
-        }
-    };
+        // 4. Ora siamo sicuri che contributorData esiste. Controlliamo se l'utente è attivo.
+        if (!contributorData[2]) {
+            return <RegistrationForm />; 
+        }
 
-    useEffect(() => {
-        fetchBatchData();
-    }, [batchId]);
-    
-    const handleFinalize = () => {
-        const confirmationMessage = "Conferma finalizzazione iscrizione\n\nSei sicuro di voler finalizzare questa iscrizione?\nDopo questa operazione non potrai più aggiungere eventi o modificare la filiera.\nL’iscrizione sarà considerata completa e chiusa.";
-        if (!batchId || !window.confirm(confirmationMessage)) return;
-        
-        const transaction = prepareContractCall({ contract, abi, method: "function closeBatch(uint256 _batchId)", params: [BigInt(batchId)] });
-        sendTransaction(transaction, {
-            onSuccess: () => { 
-                setTxResult({ status: 'success', message: 'Iscrizione finalizzata con successo!' }); 
-                setTimeout(() => fetchBatchData(), 2500); // Attendi per l'indicizzazione
-            },
-            onError: (err) => setTxResult({ status: 'error', message: `Errore: ${err.message}` })
-        });
-    };
-    
-    const handleAddEventoSuccess = () => {
-        setTxResult({ status: 'success', message: 'Evento aggiunto con successo!' });
-        setIsModalOpen(false);
-        setTimeout(() => fetchBatchData(), 2500); // Attendi per l'indicizzazione
-    };
+        // 5. Se l'utente è attivo, mostra la dashboard principale
+        return (
+            <> 
+                <DashboardHeader contributorInfo={contributorData} onNewInscriptionClick={openModal} /> 
+                <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', marginBottom: '1rem', gap: '1rem' }}>
+                    <h3 style={{ margin: 0, color: '#f8f9fa' }}>Le tue Iscrizioni</h3>
+                    <button onClick={() => fetchAllBatches()} className="web3-button secondary" disabled={isLoadingBatches} style={{padding: '8px 16px'}}>
+                        {isLoadingBatches ? 'Aggiornando...' : 'Aggiorna Lista'}
+                    </button>
+                </div>
+                {isLoadingBatches ? <p style={{textAlign: 'center', marginTop: '2rem'}}>Caricamento iscrizioni...</p> : <BatchTable batches={filteredBatches} nameFilter={nameFilter} setNameFilter={setNameFilter} locationFilter={locationFilter} setLocationFilter={setLocationFilter} statusFilter={statusFilter} setStatusFilter={setStatusFilter}/>} 
+            </>
+        ); 
+    };
+    
+    const isProcessing = loadingMessage !== '' || isPending;
 
-    return (
-        <div className="app-container-full" style={{ padding: '0 2rem' }}>
-            <header className="main-header-bar">
-                <Link to="/" style={{ textDecoration: 'none', color: 'inherit' }}><div style={{ fontSize: '1.75rem', fontWeight: 'bold' }}>EasyChain - Area Riservata</div></Link>
-                <div className="wallet-button-container"><ConnectButton client={client} chain={polygon} detailsModal={{ hideSend: true, hideReceive: true, hideBuy: true, hideTransactionHistory: true }}/></div>
-            </header>
-            
-            <main className="main-content-full">
-                {contributorInfo && <GestisciPageHeader contributorInfo={contributorInfo} />}
-                
-                {isLoading ? <p style={{textAlign: 'center', marginTop: '2rem'}}>Caricamento dati iscrizione...</p> : 
-                    <>
-                        <BatchSummaryCard batchInfo={batchInfo} eventCount={eventi.length} onAddEventoClick={() => setIsModalOpen(true)} onFinalize={handleFinalize} />
-                        
-                        <div style={{marginTop: '2rem'}}>
-                            <h4>Eventi dell'Iscrizione</h4>
-                            {eventi.length === 0 ? (
-                                <div style={{textAlign: 'center', padding: '2rem', color: '#adb5bd'}}>
-                                    <span style={{fontSize: '3rem', color: '#dc3545', fontWeight: 'bold', lineHeight: '1'}}>×</span>
-                                    <p>Nessun Evento aggiunto a questa iscrizione.</p>
-                                </div>
-                            ) : (
-                                eventi.map((evento, index) => <EventoCard key={index} eventoInfo={evento} />)
-                            )}
-                        </div>
-                    </>
-                }
-            </main>
-
-            {isModalOpen && batchId && (
-                <AggiungiEventoModal 
-                    batchId={BigInt(batchId)}
-                    contributorName={contributorInfo?.[0] || 'AziendaGenerica'}
-                    onClose={() => setIsModalOpen(false)} 
-                    onSuccess={handleAddEventoSuccess} 
-                />
-            )}
-            
-            {isFinalizing && <TransactionStatusModal status="loading" message="Finalizzazione in corso..." onClose={() => {}}/>}
-            {txResult && <TransactionStatusModal status={txResult.status} message={txResult.message} onClose={() => setTxResult(null)} />}
-        </div>
-    );
+    return (
+        <div className="app-container-full">
+            <AziendaPageStyles />
+            <header className="main-header-bar">
+                <div className="header-title">EasyChain - Area Riservata</div>
+                <div className="wallet-button-container">
+                    <ConnectButton client={client} chain={polygon} detailsModal={{ hideSend: true, hideReceive: true, hideBuy: true, hideTransactionHistory: true }}/>
+                </div>
+            </header>
+            <main className="main-content-full">{renderDashboardContent()}</main>
+            
+            {modal === 'init' && ( 
+                <div className="modal-overlay" onClick={handleCloseModal}>
+                    <div className="modal-content" onClick={(e) => e.stopPropagation()}>
+                        <div className="modal-header"><h2>Nuova Iscrizione</h2></div>
+                        <div className="modal-body" style={{ minHeight: '350px' }}>
+                            {/* Qui puoi inserire i campi del form per creare un nuovo lotto */}
+                            <p>Compila i campi per creare una nuova iscrizione.</p>
+                        </div>
+                        <div className="modal-footer" style={{ justifyContent: 'space-between' }}>
+                           <button onClick={handleCloseModal} className="web3-button secondary">Annulla</button>
+                           <button onClick={handleInitializeBatch} className="web3-button" disabled={isProcessing}>Crea</button>
+                        </div>
+                    </div>
+                </div> 
+            )}
+            
+            {isProcessing && <TransactionStatusModal status={'loading'} message={loadingMessage} onClose={() => {}} />}
+            {txResult && <TransactionStatusModal status={txResult.status} message={txResult.message} onClose={() => { if (txResult.status === 'success') handleCloseModal(); setTxResult(null); }} />}
+        </div>
+    );
 }
+
+// Esporta solo il componente della pagina, come richiesto.
+export default AziendaPage;
